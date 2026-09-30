@@ -10,12 +10,19 @@
             <column name="id" type="BIGINT" autoIncrement="true">
                 <constraints primaryKey="true" nullable="false"/>
             </column>
-            <column name="numero_contrato" type="VARCHAR(50)">
-                <constraints nullable="false"/>
+            <column name="numero_contrato" type="VARCHAR(100)">
+                <constraints nullable="false" unique="true"/>
             </column>
-            <column name="valor" type="DECIMAL(15,2)"/>
+            <column name="valor_total" type="DECIMAL(18,2)"/>
+            <column name="status" type="VARCHAR(30)" defaultValue="ATIVO"/>
             <column name="data_criacao" type="TIMESTAMP"/>
         </createTable>
+    </changeSet>
+
+    <changeSet id="20260930-02" author="athos.rocha">
+        <addColumn tableName="contratos">
+            <column name="observacoes" type="TEXT"/>
+        </addColumn>
     </changeSet>
 
 </databaseChangeLog>
