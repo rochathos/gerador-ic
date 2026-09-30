@@ -53,11 +53,11 @@ def home_view(
     if latest_exec:
         start_date_val = latest_exec.start_date.strftime("%Y-%m-%dT%H:%M")
         end_date_val = latest_exec.end_date.strftime("%Y-%m-%dT%H:%M")
-        repo_path_val = latest_exec.repo_path or settings.DEFAULT_GIT_REPO_PATH
     else:
         start_date_val = start_dt.strftime("%Y-%m-%dT%H:%M")
         end_date_val = end_dt.strftime("%Y-%m-%dT%H:%M")
-        repo_path_val = settings.DEFAULT_GIT_REPO_PATH
+
+    repo_path_val = settings.DEFAULT_GIT_REPO_PATH or (latest_exec.repo_path if latest_exec else "")
 
     # Fetch metric totals
     total_commits = db.execute(select(func.count(Commit.id))).scalar() or 0
