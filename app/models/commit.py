@@ -5,6 +5,78 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.database import Base
 
 
+def normalize_xml_metrics(raw: Any, default_count: int = 0) -> Dict[str, Any]:
+    """Normalize raw xml_tags_metrics into a standard dict containing added/removed and counts."""
+    if not isinstance(raw, dict):
+        return {
+            "added": {},
+            "removed": {},
+            "total_added": 0,
+            "total_removed": 0,
+            "total_ics": default_count or 0,
+        }
+    if "added" in raw or "removed" in raw:
+        added = raw.get("added") or {}
+        removed = raw.get("removed") or {}
+        total_added = raw.get("total_added", sum(added.values()))
+        total_removed = raw.get("total_removed", sum(removed.values()))
+        total_ics = raw.get("total_ics", total_added + total_removed)
+        return {
+            "added": added,
+            "removed": removed,
+            "total_added": total_added,
+            "total_removed": total_removed,
+            "total_ics": total_ics or default_count or 0,
+        }
+    # Backward compatibility for flat dict {tag: count}
+    total_added = sum(raw.values())
+    return {
+        "added": raw,
+        "removed": {},
+        "total_added": total_added,
+        "total_removed": 0,
+        "total_ics": default_count or total_added,
+    }
+
+
+def format_ic_details(parsed_metrics: Dict[str, Any], ic_count: int = 0) -> List[str]:
+    """Helper to generate detailed IC calculation lines showing additions and removals."""
+    total_ics = ic_count or parsed_metrics.get("total_ics", 0)
+    if total_ics <= 0:
+        return []
+
+    lines: List[str] = [""]
+    added_cnt = parsed_metrics.get("total_added", 0)
+    removed_cnt = parsed_metrics.get("total_removed", 0)
+
+    if added_cnt > 0 and removed_cnt > 0:
+        summary_str = f" ({added_cnt} adicionadas, {removed_cnt} removidas)"
+    elif added_cnt > 0:
+        summary_str = f" (+{added_cnt} adições)"
+    elif removed_cnt > 0:
+        summary_str = f" (-{removed_cnt} remoções)"
+    else:
+        summary_str = ""
+
+    lines.append(f"Itens de Catálogo (IC) calculados: {total_ics} IC(s){summary_str}")
+
+    added_tags = parsed_metrics.get("added", {})
+    removed_tags = parsed_metrics.get("removed", {})
+
+    if added_tags or removed_tags:
+        lines.append("Detalhamento das tags XML (regras do PJE):")
+        if added_tags:
+            lines.append(f"- Tags Adicionadas (+{added_cnt}):")
+            for tag, count in sorted(added_tags.items(), key=lambda x: x[1], reverse=True):
+                lines.append(f"  * <{tag}>: {count}")
+        if removed_tags:
+            lines.append(f"- Tags Removidas (-{removed_cnt}):")
+            for tag, count in sorted(removed_tags.items(), key=lambda x: x[1], reverse=True):
+                lines.append(f"  * <{tag}>: {count}")
+
+    return lines
+
+
 class Commit(Base):
     """Stores Git commit information retrieved by Productivity Assistant."""
 
@@ -102,6 +174,18 @@ class Commit(Base):
         return self.xml_files_count > 0
 
     @property
+    def ic_metrics_parsed(self) -> Dict[str, Any]:
+        return normalize_xml_metrics(getattr(self, "xml_tags_metrics", None), getattr(self, "ic_count", 0) or 0)
+
+    @property
+    def ic_added_count(self) -> int:
+        return self.ic_metrics_parsed["total_added"]
+
+    @property
+    def ic_removed_count(self) -> int:
+        return self.ic_metrics_parsed["total_removed"]
+
+    @property
     def ic_title(self) -> str:
         first_line = (self.message or "").strip().split("\n")[0].strip() if self.message else "Atividade de Desenvolvimento"
         return first_line[:180]
@@ -140,17 +224,11 @@ class Commit(Base):
             if xml_count > 0:
                 lines.append(f"(Total de arquivos XML alterados: {xml_count})")
 
-        if getattr(self, "ic_count", 0) and self.ic_count > 0:
-            lines.append("")
-            lines.append(f"Itens de Catálogo (IC) calculados: {self.ic_count} IC(s)")
-            if getattr(self, "xml_tags_metrics", None):
-                lines.append("Detalhamento das tags XML adicionadas (regra PJE):")
-                for tag, count in sorted(self.xml_tags_metrics.items(), key=lambda x: x[1], reverse=True):
-                    lines.append(f"- <{tag}>: {count}")
-
+        lines.extend(format_ic_details(self.ic_metrics_parsed, getattr(self, "ic_count", 0) or 0))
         return "\n".join(lines)
 
     def to_dict(self) -> Dict[str, Any]:
+        parsed_metrics = self.ic_metrics_parsed
         return {
             "id": self.id,
             "hash": self.hash,
@@ -167,8 +245,10 @@ class Commit(Base):
             "xml_insertions": self.xml_insertions,
             "xml_deletions": self.xml_deletions,
             "has_xml_changes": self.has_xml_changes,
-            "xml_tags_metrics": getattr(self, "xml_tags_metrics", {}) or {},
-            "ic_count": getattr(self, "ic_count", 0) or 0,
+            "xml_tags_metrics": parsed_metrics,
+            "ic_count": getattr(self, "ic_count", 0) or parsed_metrics["total_ics"],
+            "ic_added_count": self.ic_added_count,
+            "ic_removed_count": self.ic_removed_count,
             "ic_title": self.ic_title,
             "ic_description": self.ic_description,
         }
@@ -244,6 +324,18 @@ class CommitItem:
         return self.xml_files_count > 0
 
     @property
+    def ic_metrics_parsed(self) -> Dict[str, Any]:
+        return normalize_xml_metrics(self.xml_tags_metrics, self.ic_count or 0)
+
+    @property
+    def ic_added_count(self) -> int:
+        return self.ic_metrics_parsed["total_added"]
+
+    @property
+    def ic_removed_count(self) -> int:
+        return self.ic_metrics_parsed["total_removed"]
+
+    @property
     def ic_title(self) -> str:
         first_line = (self.message or "").strip().split("\n")[0].strip() if self.message else "Atividade de Desenvolvimento"
         return first_line[:180]
@@ -287,14 +379,7 @@ class CommitItem:
             if xml_count > 0:
                 lines.append(f"(Total de arquivos XML alterados: {xml_count})")
 
-        if self.ic_count and self.ic_count > 0:
-            lines.append("")
-            lines.append(f"Itens de Catálogo (IC) calculados: {self.ic_count} IC(s)")
-            if self.xml_tags_metrics:
-                lines.append("Detalhamento das tags XML adicionadas (regra PJE):")
-                for tag, count in sorted(self.xml_tags_metrics.items(), key=lambda x: x[1], reverse=True):
-                    lines.append(f"- <{tag}>: {count}")
-
+        lines.extend(format_ic_details(self.ic_metrics_parsed, self.ic_count or 0))
         return "\n".join(lines)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -304,6 +389,7 @@ class CommitItem:
                 date_str = self.commit_date.strftime("%d/%m/%Y %H:%M")
             except Exception:
                 date_str = str(self.commit_date)
+        parsed_metrics = self.ic_metrics_parsed
         return {
             "id": self.id,
             "hash": self.hash,
@@ -320,8 +406,10 @@ class CommitItem:
             "xml_insertions": self.xml_insertions,
             "xml_deletions": self.xml_deletions,
             "has_xml_changes": self.has_xml_changes,
-            "xml_tags_metrics": self.xml_tags_metrics or {},
-            "ic_count": self.ic_count or 0,
+            "xml_tags_metrics": parsed_metrics,
+            "ic_count": self.ic_count or parsed_metrics["total_ics"],
+            "ic_added_count": self.ic_added_count,
+            "ic_removed_count": self.ic_removed_count,
             "ic_title": self.ic_title,
             "ic_description": self.ic_description,
         }

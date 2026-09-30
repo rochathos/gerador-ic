@@ -326,23 +326,54 @@ function openCreateICModal(commitData) {
   const countText = document.getElementById("icCountText");
   const tagsDetail = document.getElementById("icTagsDetail");
 
-  const icCount = commit.ic_count || 0;
-  const tagsMap = commit.xml_tags_metrics || {};
+  const rawMetrics = commit.xml_tags_metrics || {};
+  let addedTags = {};
+  let removedTags = {};
+  let totalAdded = 0;
+  let totalRemoved = 0;
+
+  if (rawMetrics.added !== undefined || rawMetrics.removed !== undefined) {
+    addedTags = rawMetrics.added || {};
+    removedTags = rawMetrics.removed || {};
+    totalAdded = rawMetrics.total_added !== undefined ? rawMetrics.total_added : Object.values(addedTags).reduce((a, b) => a + b, 0);
+    totalRemoved = rawMetrics.total_removed !== undefined ? rawMetrics.total_removed : Object.values(removedTags).reduce((a, b) => a + b, 0);
+  } else if (typeof rawMetrics === "object") {
+    addedTags = rawMetrics;
+    totalAdded = Object.values(addedTags).reduce((a, b) => a + b, 0);
+  }
+
+  const effectiveTotalICs = commit.ic_count || (totalAdded + totalRemoved);
 
   if (tagsAlert && countText && tagsDetail) {
-    if (icCount > 0) {
+    if (effectiveTotalICs > 0) {
       tagsAlert.classList.remove("d-none");
-      countText.textContent = `${icCount} Item(ns) de Catálogo (IC) calculados`;
-
-      const tagEntries = Object.entries(tagsMap);
-      if (tagEntries.length > 0) {
-        tagEntries.sort((a, b) => b[1] - a[1]);
-        tagsDetail.innerHTML = tagEntries
-          .map(([t, c]) => `<span class="badge bg-warning text-dark border border-warning-subtle fw-semibold px-2 py-1">&lt;${t}&gt;: ${c}</span>`)
-          .join(" ");
-      } else {
-        tagsDetail.innerHTML = `<span class="text-muted small">Tags válidas calculadas.</span>`;
+      let countLabel = `${effectiveTotalICs} Item(ns) de Catálogo (IC) calculados`;
+      if (totalAdded > 0 && totalRemoved > 0) {
+        countLabel += ` (${totalAdded} adicionadas, ${totalRemoved} removidas)`;
+      } else if (totalAdded > 0) {
+        countLabel += ` (+${totalAdded} adições)`;
+      } else if (totalRemoved > 0) {
+        countLabel += ` (-${totalRemoved} remoções)`;
       }
+      countText.textContent = countLabel;
+
+      let htmlBadges = "";
+      const addEntries = Object.entries(addedTags).sort((a, b) => b[1] - a[1]);
+      const remEntries = Object.entries(removedTags).sort((a, b) => b[1] - a[1]);
+
+      if (addEntries.length > 0) {
+        htmlBadges += `<div class="d-flex align-items-center gap-1 flex-wrap mb-1"><span class="text-success small fw-bold me-1"><i class="bi bi-plus-circle me-1"></i>Adicionadas (+${totalAdded}):</span>`;
+        htmlBadges += addEntries.map(([t, c]) => `<span class="badge bg-success bg-opacity-25 text-success border border-success-subtle fw-semibold px-2 py-1">&lt;${t}&gt;: ${c}</span>`).join(" ");
+        htmlBadges += `</div>`;
+      }
+
+      if (remEntries.length > 0) {
+        htmlBadges += `<div class="d-flex align-items-center gap-1 flex-wrap"><span class="text-danger small fw-bold me-1"><i class="bi bi-dash-circle me-1"></i>Removidas (-${totalRemoved}):</span>`;
+        htmlBadges += remEntries.map(([t, c]) => `<span class="badge bg-danger bg-opacity-25 text-danger border border-danger-subtle fw-semibold px-2 py-1">&lt;${t}&gt;: ${c}</span>`).join(" ");
+        htmlBadges += `</div>`;
+      }
+
+      tagsDetail.innerHTML = htmlBadges || `<span class="text-muted small">Tags válidas calculadas.</span>`;
     } else {
       tagsAlert.classList.add("d-none");
       countText.textContent = "";
@@ -374,6 +405,34 @@ function openCreateICModal(commitData) {
     lines.push("");
     lines.push("Descrição:");
     lines.push((commit.message || "").trim());
+
+    if (effectiveTotalICs > 0) {
+      lines.push("");
+      let countSummary = "";
+      if (totalAdded > 0 && totalRemoved > 0) {
+        countSummary = ` (${totalAdded} adicionadas, ${totalRemoved} removidas)`;
+      } else if (totalAdded > 0) {
+        countSummary = ` (+${totalAdded} adições)`;
+      } else if (totalRemoved > 0) {
+        countSummary = ` (-${totalRemoved} remoções)`;
+      }
+      lines.push(`Itens de Catálogo (IC) calculados: ${effectiveTotalICs} IC(s)${countSummary}`);
+      if (Object.keys(addedTags).length > 0 || Object.keys(removedTags).length > 0) {
+        lines.push("Detalhamento das tags XML (regras do PJE):");
+        if (Object.keys(addedTags).length > 0) {
+          lines.push(`- Tags Adicionadas (+${totalAdded}):`);
+          Object.entries(addedTags).sort((a, b) => b[1] - a[1]).forEach(([t, c]) => {
+            lines.push(`  * <${t}>: ${c}`);
+          });
+        }
+        if (Object.keys(removedTags).length > 0) {
+          lines.push(`- Tags Removidas (-${totalRemoved}):`);
+          Object.entries(removedTags).sort((a, b) => b[1] - a[1]).forEach(([t, c]) => {
+            lines.push(`  * <${t}>: ${c}`);
+          });
+        }
+      }
+    }
 
     if (commit.files_changed && commit.files_changed.length > 0) {
       lines.push("");

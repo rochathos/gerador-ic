@@ -30,8 +30,9 @@ class GitService:
 
     @classmethod
     def analyze_commit_xml_tags(cls, repo: git.Repo, commit_hash: str) -> Dict[str, Any]:
-        """Extract XML tag metrics from commit diff, following icf.sh counting rules."""
-        tags_count: Dict[str, int] = {}
+        """Extract XML tag metrics (both added and removed) from commit diff, following icf.sh counting rules."""
+        added_tags: Dict[str, int] = {}
+        removed_tags: Dict[str, int] = {}
         try:
             patch_output = repo.git.show(commit_hash, "--pretty=format:", "-p", "--", "*.xml")
             if patch_output:
@@ -41,12 +42,26 @@ class GitService:
                         if match:
                             tag = match.group(1).lower()
                             if tag not in cls.EXCLUDED_XML_TAGS:
-                                tags_count[tag] = tags_count.get(tag, 0) + 1
+                                added_tags[tag] = added_tags.get(tag, 0) + 1
+                    elif line.startswith("-") and not line.startswith("---"):
+                        match = cls.TAG_REGEX.search(line)
+                        if match:
+                            tag = match.group(1).lower()
+                            if tag not in cls.EXCLUDED_XML_TAGS:
+                                removed_tags[tag] = removed_tags.get(tag, 0) + 1
         except Exception as exc:
             logger.debug(f"Erro ao extrair diff de tags XML para o commit {commit_hash[:7]}: {exc}")
 
-        total_ics = sum(tags_count.values())
-        return {"tags": tags_count, "total_ics": total_ics}
+        total_added = sum(added_tags.values())
+        total_removed = sum(removed_tags.values())
+        total_ics = total_added + total_removed
+        return {
+            "added": added_tags,
+            "removed": removed_tags,
+            "total_added": total_added,
+            "total_removed": total_removed,
+            "total_ics": total_ics,
+        }
 
     @staticmethod
     def validate_repository(repo_path: str | Path) -> Tuple[bool, str]:
@@ -183,10 +198,11 @@ class GitService:
                 try:
                     stats = commit.stats
                     for file_path, file_stat in stats.files.items():
-                        is_xml = file_path.lower().endswith(".xml")
+                        clean_path = file_path.strip('"').strip("'")
+                        is_xml = clean_path.lower().endswith(".xml")
                         files_changed.append({
-                            "path": file_path,
-                            "filename": file_path.replace("\\", "/").split("/")[-1],
+                            "path": clean_path,
+                            "filename": clean_path.replace("\\", "/").split("/")[-1],
                             "is_xml": is_xml,
                             "insertions": file_stat.get("insertions", 0),
                             "deletions": file_stat.get("deletions", 0),
@@ -200,10 +216,11 @@ class GitService:
                             for d in diff:
                                 target_path = d.a_path or d.b_path
                                 if target_path:
+                                    clean_path = str(target_path).strip('"').strip("'")
                                     files_changed.append({
-                                        "path": target_path,
-                                        "filename": target_path.replace("\\", "/").split("/")[-1],
-                                        "is_xml": target_path.lower().endswith(".xml"),
+                                        "path": clean_path,
+                                        "filename": clean_path.replace("\\", "/").split("/")[-1],
+                                        "is_xml": clean_path.lower().endswith(".xml"),
                                         "insertions": 0,
                                         "deletions": 0,
                                         "lines": 0,
@@ -213,11 +230,17 @@ class GitService:
 
                 # Check for XML changes and analyze tags using icf.sh rules
                 has_xml = any(
-                    f.get("is_xml") or str(f.get("path", "")).lower().endswith(".xml")
+                    f.get("is_xml") or str(f.get("path", "")).strip('"').strip("'").lower().endswith(".xml")
                     for f in files_changed
                     if isinstance(f, dict)
                 )
-                xml_analysis = cls.analyze_commit_xml_tags(repo, commit.hexsha) if has_xml else {"tags": {}, "total_ics": 0}
+                xml_analysis = cls.analyze_commit_xml_tags(repo, commit.hexsha) if has_xml else {
+                    "added": {},
+                    "removed": {},
+                    "total_added": 0,
+                    "total_removed": 0,
+                    "total_ics": 0,
+                }
 
                 commit_author_display = f"{commit.author.name} <{commit.author.email}>" if commit.author.email else commit.author.name
                 commit_url = cls.get_commit_url(path, commit.hexsha)
@@ -234,7 +257,7 @@ class GitService:
                         "repo_name": cls.get_repo_name(path),
                         "repo_path": str(path),
                         "commit_url": commit_url,
-                        "xml_tags_metrics": xml_analysis["tags"],
+                        "xml_tags_metrics": xml_analysis,
                         "ic_count": xml_analysis["total_ics"],
                     }
                 )

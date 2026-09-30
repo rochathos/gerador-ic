@@ -308,7 +308,7 @@
                 <td class="text-center">
                   <div class="d-flex align-items-center justify-content-center gap-1 flex-wrap">
                     {% if commit.ic_count and commit.ic_count > 0 %}
-                    <span class="badge bg-warning text-dark fw-bold" title="{{ commit.ic_count }} IC(s) calculados pelas regras do PJE (icf.sh)">
+                    <span class="badge bg-warning text-dark fw-bold" title="{{ commit.ic_count }} IC(s) calculados (+{{ commit.ic_added_count or 0 }} add / -{{ commit.ic_removed_count or 0 }} rem)">
                       <i class="bi bi-tag-fill me-1"></i>{{ commit.ic_count }} ICs
                     </span>
                     {% elif commit.has_xml_changes %}

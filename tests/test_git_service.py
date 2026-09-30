@@ -124,7 +124,7 @@ def test_xml_tags_ic_counting():
     assert "script" in GitService.EXCLUDED_XML_TAGS
     assert "event" in GitService.EXCLUDED_XML_TAGS
 
-    # Test regex tag parsing
+    # Test regex tag parsing for additions (+)
     line1 = '+   <transition to="fim" name="concluir"/>'
     m1 = GitService.TAG_REGEX.search(line1)
     assert m1 is not None
@@ -137,3 +137,55 @@ def test_xml_tags_ic_counting():
     assert m2 is not None
     tag2 = m2.group(1).lower()
     assert tag2 in GitService.EXCLUDED_XML_TAGS
+
+    # Test regex tag parsing for removals (-)
+    line3 = '-   <decision name="Decisao Antiga">'
+    m3 = GitService.TAG_REGEX.search(line3)
+    assert m3 is not None
+    tag3 = m3.group(1).lower()
+    assert tag3 == "decision"
+    assert tag3 not in GitService.EXCLUDED_XML_TAGS
+
+    line4 = '-   <condition expression="#{false}"/>'
+    m4 = GitService.TAG_REGEX.search(line4)
+    assert m4 is not None
+    tag4 = m4.group(1).lower()
+    assert tag4 in GitService.EXCLUDED_XML_TAGS
+
+    # Test normalize_xml_metrics and formatting
+    from app.models.commit import normalize_xml_metrics, format_ic_details
+
+    metrics = {
+        "added": {"transition": 2, "decision": 1},
+        "removed": {"decision": 1},
+        "total_added": 3,
+        "total_removed": 1,
+        "total_ics": 4,
+    }
+    normalized = normalize_xml_metrics(metrics)
+    assert normalized["total_added"] == 3
+    assert normalized["total_removed"] == 1
+    assert normalized["total_ics"] == 4
+
+    lines = format_ic_details(normalized, 4)
+    text = "\n".join(lines)
+    assert "Itens de Catálogo (IC) calculados: 4 IC(s) (3 adicionadas, 1 removidas)" in text
+    assert "Tags Adicionadas (+3)" in text
+    assert "<transition>: 2" in text
+    assert "Tags Removidas (-1)" in text
+    assert "<decision>: 1" in text
+
+    # Test removals-only scenario (e.g. only removing decisions/transitions)
+    removals_only = {
+        "added": {},
+        "removed": {"decision": 2},
+        "total_added": 0,
+        "total_removed": 2,
+        "total_ics": 2,
+    }
+    rem_lines = format_ic_details(normalize_xml_metrics(removals_only), 2)
+    rem_text = "\n".join(rem_lines)
+    assert "Itens de Catálogo (IC) calculados: 2 IC(s) (-2 remoções)" in rem_text
+    assert "Tags Removidas (-2)" in rem_text
+    assert "<decision>: 2" in rem_text
+    assert "Tags Adicionadas" not in rem_text
