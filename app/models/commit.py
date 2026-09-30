@@ -18,6 +18,7 @@ class Commit(Base):
     files_changed: Mapped[Any] = mapped_column(JSON, nullable=True)  # List of changed file names/stats
     repo_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
     repo_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    commit_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     execution_id: Mapped[Optional[int]] = mapped_column(
         Integer, ForeignKey("execution_history.id", ondelete="SET NULL"), nullable=True, index=True
     )
@@ -34,6 +35,21 @@ class Commit(Base):
     @property
     def short_hash(self) -> str:
         return self.hash[:7] if self.hash else ""
+
+    @property
+    def web_commit_url(self) -> Optional[str]:
+        """Return the web link for the commit (GitHub, GitLab, etc.)."""
+        if self.commit_url:
+            return self.commit_url
+        if self.repo_path:
+            try:
+                from app.services.git_service import GitService
+                derived = GitService.get_commit_url(self.repo_path, self.hash)
+                if derived:
+                    return derived
+            except Exception:
+                pass
+        return None
 
     @property
     def files_count(self) -> int:

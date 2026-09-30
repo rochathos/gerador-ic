@@ -54,6 +54,38 @@ class GitService:
         return path.name
 
     @classmethod
+    def get_commit_url(cls, repo_path: str | Path, commit_hash: str) -> Optional[str]:
+        """Generate web URL for viewing the commit on GitHub, GitLab, etc."""
+        path = Path(repo_path).resolve()
+        try:
+            repo = git.Repo(path)
+            for remote in repo.remotes:
+                for raw_url in remote.urls:
+                    url = raw_url.strip()
+                    # Convert SSH syntax: git@domain:org/repo.git -> https://domain/org/repo
+                    if url.startswith("git@"):
+                        url = url.replace(":", "/", 1).replace("git@", "https://")
+                    if url.endswith(".git"):
+                        url = url[:-4]
+                    url = url.rstrip("/")
+
+                    # Detect platform URL structure
+                    url_lower = url.lower()
+                    if "gitlab" in url_lower or "git.tjce" in url_lower or "git.cnj" in url_lower:
+                        return f"{url}/-/commit/{commit_hash}"
+                    elif "bitbucket" in url_lower:
+                        return f"{url}/commits/{commit_hash}"
+                    elif "dev.azure.com" in url_lower or "visualstudio.com" in url_lower:
+                        return f"{url}/commit/{commit_hash}"
+                    else:
+                        # Default standard (GitHub, Gitea, etc.)
+                        return f"{url}/commit/{commit_hash}"
+        except Exception:
+            pass
+        return None
+
+
+    @classmethod
     def get_commits(
         cls,
         repo_path: str | Path,
@@ -150,6 +182,8 @@ class GitService:
 
                 commit_author_display = f"{commit.author.name} <{commit.author.email}>" if commit.author.email else commit.author.name
 
+                commit_url = cls.get_commit_url(path, commit.hexsha)
+
                 commits_found.append(
                     {
                         "hash": commit.hexsha,
@@ -161,6 +195,7 @@ class GitService:
                         "files_changed": files_changed,
                         "repo_name": cls.get_repo_name(path),
                         "repo_path": str(path),
+                        "commit_url": commit_url,
                     }
                 )
 
@@ -197,6 +232,8 @@ class GitService:
                     existing.files_changed = item["files_changed"]
                     existing.repo_name = item.get("repo_name")
                     existing.repo_path = item.get("repo_path")
+                    if item.get("commit_url"):
+                        existing.commit_url = item["commit_url"]
                     saved_records.append(existing)
                 else:
                     new_commit = Commit(
@@ -207,6 +244,7 @@ class GitService:
                         files_changed=item["files_changed"],
                         repo_name=item.get("repo_name"),
                         repo_path=item.get("repo_path"),
+                        commit_url=item.get("commit_url"),
                         execution_id=execution_id,
                     )
                     db.add(new_commit)

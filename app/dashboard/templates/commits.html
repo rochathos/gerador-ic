@@ -121,9 +121,18 @@
               <tr>
                 <td>
                   <div class="d-flex align-items-center gap-1">
+                    {% if commit.web_commit_url %}
+                    <a href="{{ commit.web_commit_url }}" target="_blank" class="badge-hash text-decoration-none d-inline-flex align-items-center gap-1" title="Abrir commit no GitLab/GitHub">
+                      {{ commit.short_hash }} <i class="bi bi-box-arrow-up-right" style="font-size: 0.65rem;"></i>
+                    </a>
+                    <button type="button" class="btn btn-link btn-sm p-0 text-info copy-btn" data-copy="{{ commit.web_commit_url }}" title="Copiar link direto do commit">
+                      <i class="bi bi-link-45deg fs-6"></i>
+                    </button>
+                    {% else %}
                     <span class="badge-hash">{{ commit.short_hash }}</span>
-                    <button type="button" class="btn btn-link btn-sm p-0 text-muted copy-btn" data-copy="{{ commit.hash }}" title="Copiar hash">
-                      <i class="bi bi-clipboard"></i>
+                    {% endif %}
+                    <button type="button" class="btn btn-link btn-sm p-0 text-muted copy-btn" data-copy="{{ commit.hash }}" title="Copiar hash completo">
+                      <i class="bi bi-clipboard" style="font-size: 0.75rem;"></i>
                     </button>
                   </div>
                 </td>
