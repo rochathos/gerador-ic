@@ -1,0 +1,315 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard Principal - Productivity Assistant{% endblock %}
+
+{% block content %}
+<div class="row g-4 mb-4">
+  <!-- Header with Page Title and Status -->
+  <div class="col-12 d-flex flex-wrap justify-content-between align-items-center gap-3">
+    <div>
+      <h2 class="fw-bold mb-1 d-flex align-items-center gap-2">
+        <i class="bi bi-speedometer2 text-primary"></i> Painel de Produtividade
+      </h2>
+      <p class="text-muted mb-0">
+        Levantamento automatizado de atividades e geração de Itens de Catálogo (IC).
+      </p>
+    </div>
+
+    <!-- Quick action buttons -->
+    <div class="d-flex flex-wrap gap-2">
+      <a href="/catalog-items" class="btn btn-secondary-custom d-flex align-items-center gap-2">
+        <i class="bi bi-magic text-warning"></i>
+        <span>Gerar Sugestões</span>
+      </a>
+      <a href="/catalog-items" class="btn btn-secondary-custom d-flex align-items-center gap-2">
+        <i class="bi bi-box-arrow-up-right text-info"></i>
+        <span>Criar ICs no Redmine</span>
+      </a>
+      <div class="dropdown">
+        <button class="btn btn-secondary-custom dropdown-toggle d-flex align-items-center gap-2" type="button" data-bs-toggle="dropdown">
+          <i class="bi bi-download text-success"></i>
+          <span>Gerar Relatório</span>
+        </button>
+        <ul class="dropdown-menu dropdown-menu-dark border-secondary">
+          <li><a class="dropdown-item d-flex align-items-center gap-2" href="/export/excel{% if latest_execution %}?execution_id={{ latest_execution.id }}{% endif %}"><i class="bi bi-file-earmark-excel text-success"></i> Exportar Excel</a></li>
+          <li><a class="dropdown-item d-flex align-items-center gap-2" href="/export/pdf{% if latest_execution %}?execution_id={{ latest_execution.id }}{% endif %}"><i class="bi bi-file-earmark-pdf text-danger"></i> Exportar PDF</a></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- KPI / Metric Cards -->
+  <div class="col-12 col-sm-6 col-xl-3">
+    <div class="card-glass stat-card">
+      <div class="d-flex justify-content-between align-items-start mb-2">
+        <div>
+          <div class="stat-label">Total de Commits</div>
+          <div class="stat-value">{{ total_commits or 0 }}</div>
+        </div>
+        <div class="stat-icon primary">
+          <i class="bi bi-git"></i>
+        </div>
+      </div>
+      <div class="text-muted small d-flex align-items-center gap-1">
+        <i class="bi bi-clock-history"></i> No período selecionado
+      </div>
+    </div>
+  </div>
+
+  <div class="col-12 col-sm-6 col-xl-3">
+    <div class="card-glass stat-card">
+      <div class="d-flex justify-content-between align-items-start mb-2">
+        <div>
+          <div class="stat-label">Total de Reuniões</div>
+          <div class="stat-value">{{ total_meetings or 0 }}</div>
+        </div>
+        <div class="stat-icon info">
+          <i class="bi bi-calendar-event"></i>
+        </div>
+      </div>
+      <div class="text-muted small d-flex align-items-center gap-1">
+        <i class="bi bi-microsoft"></i> Integração Teams (Fase 2)
+      </div>
+    </div>
+  </div>
+
+  <div class="col-12 col-sm-6 col-xl-3">
+    <div class="card-glass stat-card">
+      <div class="d-flex justify-content-between align-items-start mb-2">
+        <div>
+          <div class="stat-label">ICs Sugeridos</div>
+          <div class="stat-value">{{ total_suggested_ics or 0 }}</div>
+        </div>
+        <div class="stat-icon warning">
+          <i class="bi bi-lightbulb"></i>
+        </div>
+      </div>
+      <div class="text-muted small d-flex align-items-center gap-1">
+        <i class="bi bi-arrow-right"></i> Aguardando aprovação
+      </div>
+    </div>
+  </div>
+
+  <div class="col-12 col-sm-6 col-xl-3">
+    <div class="card-glass stat-card">
+      <div class="d-flex justify-content-between align-items-start mb-2">
+        <div>
+          <div class="stat-label">ICs Criados no Redmine</div>
+          <div class="stat-value">{{ total_created_ics or 0 }}</div>
+        </div>
+        <div class="stat-icon success">
+          <i class="bi bi-check2-circle"></i>
+        </div>
+      </div>
+      <div class="text-muted small d-flex align-items-center gap-1">
+        <i class="bi bi-shield-check"></i> Com evidências salvas
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Main Analysis & Filtering Section -->
+<div class="row g-4 mb-4">
+  <div class="col-12 col-lg-5">
+    <div class="card-glass p-4 h-100">
+      <h5 class="fw-bold mb-3 d-flex align-items-center gap-2">
+        <i class="bi bi-funnel text-primary"></i> Seleção de Período & Filtros
+      </h5>
+
+      <!-- Quick filters -->
+      <div class="mb-3">
+        <label class="form-label text-muted small fw-bold">FILTROS RÁPIDOS:</label>
+        <div class="d-flex flex-wrap gap-2">
+          <button type="button" class="btn btn-quick-filter" data-filter="hoje">Hoje</button>
+          <button type="button" class="btn btn-quick-filter" data-filter="ontem">Ontem</button>
+          <button type="button" class="btn btn-quick-filter active" data-filter="esta_semana">Esta Semana</button>
+          <button type="button" class="btn btn-quick-filter" data-filter="este_mes">Este Mês</button>
+          <button type="button" class="btn btn-quick-filter" data-filter="personalizado">Personalizado</button>
+        </div>
+      </div>
+
+      <!-- Extraction Form -->
+      <form id="search-form" method="POST" action="/analyze">
+        <div class="row g-3 mb-3">
+          <div class="col-12 col-sm-6">
+            <label for="start_date" class="form-label text-muted small fw-semibold">Data Inicial</label>
+            <input type="datetime-local" class="form-control form-control-custom" id="start_date" name="start_date" value="{{ start_date_val }}" required>
+          </div>
+          <div class="col-12 col-sm-6">
+            <label for="end_date" class="form-label text-muted small fw-semibold">Data Final</label>
+            <input type="datetime-local" class="form-control form-control-custom" id="end_date" name="end_date" value="{{ end_date_val }}" required>
+          </div>
+        </div>
+
+        <div class="mb-3">
+          <label for="repo_path" class="form-label text-muted small fw-semibold">Caminho do Repositório Git Local</label>
+          <div class="input-group">
+            <span class="input-group-text bg-dark border-secondary text-muted"><i class="bi bi-folder2-open"></i></span>
+            <input type="text" class="form-control form-control-custom" id="repo_path" name="repo_path" value="{{ repo_path_val }}" placeholder="Ex: D:\Projetos\meu-projeto" required>
+          </div>
+          <div class="form-text text-dim small">Repositório local onde os commits foram realizados.</div>
+        </div>
+
+        <div class="mb-4">
+          <label for="author" class="form-label text-muted small fw-semibold">Filtro de Autor (Git)</label>
+          <div class="input-group">
+            <span class="input-group-text bg-dark border-secondary text-muted"><i class="bi bi-person"></i></span>
+            <input type="text" class="form-control form-control-custom" id="author" name="author" value="{{ author_val }}" placeholder="Deixe em branco para todos os autores">
+          </div>
+          <div class="form-text text-dim small">Ex: athos.rocha ou athosrocha123@gmail.com</div>
+        </div>
+
+        <button type="submit" class="btn btn-primary-custom w-100 d-flex align-items-center justify-content-center gap-2 py-2">
+          <i class="bi bi-search"></i>
+          <span>Buscar Dados & Salvar no PostgreSQL</span>
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Period & Execution Status Summary -->
+  <div class="col-12 col-lg-7">
+    <div class="card-glass p-4 h-100 d-flex flex-column justify-content-between">
+      <div>
+        <div class="d-flex justify-content-between align-items-center mb-3">
+          <h5 class="fw-bold mb-0 d-flex align-items-center gap-2">
+            <i class="bi bi-info-circle text-info"></i> Período & Status da Última Análise
+          </h5>
+          {% if latest_execution %}
+          <span class="badge bg-success-subtle text-success border border-success-subtle">
+            Execução #{{ latest_execution.id }}
+          </span>
+          {% endif %}
+        </div>
+
+        {% if latest_execution %}
+        <div class="row g-3 mb-3">
+          <div class="col-12 col-md-6">
+            <div class="p-3 bg-dark bg-opacity-50 rounded-3 border border-secondary border-opacity-25">
+              <div class="text-muted small">Período Inicial</div>
+              <div class="fw-bold fs-6 text-light">{{ latest_execution.start_date.strftime("%d/%m/%Y %H:%M") }}</div>
+            </div>
+          </div>
+          <div class="col-12 col-md-6">
+            <div class="p-3 bg-dark bg-opacity-50 rounded-3 border border-secondary border-opacity-25">
+              <div class="text-muted small">Período Final</div>
+              <div class="fw-bold fs-6 text-light">{{ latest_execution.end_date.strftime("%d/%m/%Y %H:%M") }}</div>
+            </div>
+          </div>
+          <div class="col-12">
+            <div class="p-3 bg-dark bg-opacity-50 rounded-3 border border-secondary border-opacity-25">
+              <div class="text-muted small">Repositório Analisado</div>
+              <div class="text-truncate font-monospace small text-info">{{ latest_execution.repo_path }}</div>
+            </div>
+          </div>
+        </div>
+        {% else %}
+        <div class="p-4 bg-dark bg-opacity-50 rounded-3 border border-secondary border-opacity-25 text-center my-4">
+          <i class="bi bi-clock-history fs-1 text-muted d-block mb-2"></i>
+          <p class="text-muted mb-0">Nenhuma execução realizada ainda. Selecione um período e clique em "Buscar Dados".</p>
+        </div>
+        {% endif %}
+      </div>
+
+      <!-- Quick action links -->
+      <div class="d-flex flex-wrap gap-2 pt-3 border-top border-secondary border-opacity-25">
+        <a href="/commits" class="btn btn-sm btn-secondary-custom d-flex align-items-center gap-1">
+          <i class="bi bi-git"></i> Ver Todos os Commits
+        </a>
+        <a href="/history" class="btn btn-sm btn-secondary-custom d-flex align-items-center gap-1">
+          <i class="bi bi-clock-history"></i> Ver Histórico Completo
+        </a>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Commits Table in Current Session -->
+<div class="row g-4">
+  <div class="col-12">
+    <div class="card-glass">
+      <div class="p-4 border-bottom border-secondary border-opacity-25 d-flex flex-wrap justify-content-between align-items-center gap-3">
+        <div>
+          <h5 class="fw-bold mb-1 d-flex align-items-center gap-2">
+            <i class="bi bi-git text-primary"></i> Commits Encontrados
+            <span class="badge bg-primary rounded-pill small">{{ commits|length }}</span>
+          </h5>
+          <p class="text-muted small mb-0">Commits persistidos no PostgreSQL prontos para agrupamento e criação de ICs.</p>
+        </div>
+        <div class="d-flex gap-2">
+          <a href="/commits" class="btn btn-sm btn-secondary-custom">
+            <i class="bi bi-arrows-fullscreen me-1"></i> Expandir Tabela
+          </a>
+        </div>
+      </div>
+
+      <div class="table-responsive">
+        <table class="table table-custom align-middle">
+          <thead>
+            <tr>
+              <th style="width: 120px;">Hash</th>
+              <th style="width: 170px;">Data/Hora</th>
+              <th style="width: 220px;">Autor</th>
+              <th>Mensagem do Commit</th>
+              <th style="width: 140px;" class="text-center">Arquivos</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% if commits %}
+              {% for commit in commits[:15] %}
+              <tr>
+                <td>
+                  <div class="d-flex align-items-center gap-1">
+                    <span class="badge-hash">{{ commit.short_hash }}</span>
+                    <button type="button" class="btn btn-link btn-sm p-0 text-muted copy-btn" data-copy="{{ commit.hash }}" title="Copiar hash completo">
+                      <i class="bi bi-clipboard"></i>
+                    </button>
+                  </div>
+                </td>
+                <td class="text-muted small">
+                  {{ commit.commit_date.strftime("%d/%m/%Y %H:%M") }}
+                </td>
+                <td>
+                  <div class="fw-medium text-light small">{{ commit.author }}</div>
+                  {% if commit.repo_name %}
+                  <span class="badge bg-secondary-subtle text-secondary small" style="font-size:0.7rem;">{{ commit.repo_name }}</span>
+                  {% endif %}
+                </td>
+                <td>
+                  <div class="text-light fw-medium">{{ commit.message }}</div>
+                </td>
+                <td class="text-center">
+                  {% if commit.files_changed %}
+                  <button type="button" class="btn btn-sm btn-secondary-custom py-1 px-2 small" onclick='viewFiles("{{ commit.hash }}", {{ commit.files_changed|tojson }})'>
+                    <i class="bi bi-file-code me-1 text-info"></i> {{ commit.files_count }} arq
+                  </button>
+                  {% else %}
+                  <span class="text-muted small">-</span>
+                  {% endif %}
+                </td>
+              </tr>
+              {% endfor %}
+            {% else %}
+              <tr>
+                <td colspan="5" class="text-center py-5 text-muted">
+                  <i class="bi bi-inbox fs-2 d-block mb-2 text-dim"></i>
+                  Nenhum commit encontrado no período selecionado.<br/>
+                  Selecione outro período ou verifique o caminho do repositório Git.
+                </td>
+              </tr>
+            {% endif %}
+          </tbody>
+        </table>
+      </div>
+
+      {% if commits|length > 15 %}
+      <div class="p-3 text-center border-top border-secondary border-opacity-25">
+        <a href="/commits" class="text-primary text-decoration-none small fw-semibold">
+          Exibindo 15 de {{ commits|length }} commits. Clique aqui para ver a listagem completa <i class="bi bi-arrow-right"></i>
+        </a>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+
+{% block title %}Reuniões - Productivity Assistant{% endblock %}
+
+{% block content %}
+<div class="row g-4 mb-4">
+  <div class="col-12 d-flex flex-wrap justify-content-between align-items-center gap-3">
+    <div>
+      <h2 class="fw-bold mb-1 d-flex align-items-center gap-2">
+        <i class="bi bi-calendar3 text-info"></i> Reuniões
+      </h2>
+      <p class="text-muted mb-0">
+        Reuniões realizadas pelo usuário no período selecionado (preparado para integração Microsoft Teams na Fase 2).
+      </p>
+    </div>
+    <div>
+      <a href="/" class="btn btn-secondary-custom">
+        <i class="bi bi-arrow-left me-1"></i> Voltar ao Painel
+      </a>
+    </div>
+  </div>
+
+  <!-- Teams status banner -->
+  <div class="col-12">
+    <div class="card-glass p-3 border-info border-opacity-25 bg-opacity-25 d-flex align-items-center gap-3">
+      <div class="stat-icon info" style="width:40px; height:40px;">
+        <i class="bi bi-microsoft"></i>
+      </div>
+      <div>
+        <div class="fw-bold text-light">Módulo de Reuniões & Calendário</div>
+        <div class="text-muted small">
+          A estrutura de dados e persistência no PostgreSQL está pronta. Na Fase 2 será habilitada a leitura direta do calendário do Microsoft Teams.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Meetings Table -->
+  <div class="col-12">
+    <div class="card-glass">
+      <div class="p-3 border-bottom border-secondary border-opacity-25">
+        <span class="text-muted small">Total de reuniões registradas: <b class="text-light">{{ meetings|length }}</b></span>
+      </div>
+
+      <div class="table-responsive">
+        <table class="table table-custom align-middle">
+          <thead>
+            <tr>
+              <th>Título da Reunião</th>
+              <th style="width: 200px;">Horário Inicial</th>
+              <th style="width: 200px;">Horário Final</th>
+              <th style="width: 140px;" class="text-center">Duração</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% if meetings %}
+              {% for m in meetings %}
+              <tr>
+                <td>
+                  <div class="fw-medium text-light">{{ m.title }}</div>
+                </td>
+                <td class="text-muted small">
+                  {{ m.start_time.strftime("%d/%m/%Y %H:%M") }}
+                </td>
+                <td class="text-muted small">
+                  {{ m.end_time.strftime("%d/%m/%Y %H:%M") }}
+                </td>
+                <td class="text-center">
+                  <span class="badge bg-dark border border-secondary text-info">{{ m.duration }}</span>
+                </td>
+              </tr>
+              {% endfor %}
+            {% else %}
+              <tr>
+                <td colspan="4" class="text-center py-5 text-muted">
+                  <i class="bi bi-calendar-x fs-2 d-block mb-2 text-dim"></i>
+                  Nenhuma reunião registrada no período.<br/>
+                  A integração do Microsoft Teams estará ativa na Fase 2.
+                </td>
+              </tr>
+            {% endif %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
