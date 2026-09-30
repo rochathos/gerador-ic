@@ -60,7 +60,7 @@ class ReportService:
 
         # Tab 2: Commits
         ws_commits = wb.create_sheet(title="Commits")
-        headers = ["Hash", "Data/Hora", "Autor", "Mensagem", "Arquivos Alterados", "Repositório"]
+        headers = ["Hash", "Data/Hora", "Autor", "Mensagem", "Arquivos Alterados", "XMLs Alterados", "Linhas XML (+/-)", "Repositório"]
         ws_commits.append(headers)
         for col_num, _ in enumerate(headers, 1):
             cell = ws_commits.cell(row=1, column=col_num)
@@ -68,17 +68,34 @@ class ReportService:
             cell.font = header_font
 
         for c in commits:
-            files_str = ", ".join(c.files_changed) if isinstance(c.files_changed, list) else str(c.files_changed or "")
+            if isinstance(c.files_changed, list):
+                formatted_files = []
+                for f in c.files_changed:
+                    if isinstance(f, dict):
+                        ins = f.get('insertions', 0)
+                        dels = f.get('deletions', 0)
+                        formatted_files.append(f"{f.get('path', '')} (+{ins}/-{dels})")
+                    else:
+                        formatted_files.append(str(f))
+                files_str = ", ".join(formatted_files)
+            else:
+                files_str = str(c.files_changed or "")
+
+            xml_info = f"{c.xml_files_count} arq" if c.has_xml_changes else "0"
+            xml_diffs = f"+{c.xml_insertions} / -{c.xml_deletions}" if c.has_xml_changes else "0"
+
             ws_commits.append([
                 c.short_hash,
                 c.commit_date.strftime("%d/%m/%Y %H:%M"),
                 c.author,
                 c.message,
                 files_str,
+                xml_info,
+                xml_diffs,
                 c.repo_name or "",
             ])
 
-        for col in ["A", "B", "C", "D", "E", "F"]:
+        for col in ["A", "B", "C", "D", "E", "F", "G", "H"]:
             ws_commits.column_dimensions[col].width = 25
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")

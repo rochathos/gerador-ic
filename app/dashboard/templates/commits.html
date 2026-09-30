@@ -31,7 +31,7 @@
     </div>
   </div>
 
-  <!-- Filter Card -->
+  <!-- Filter Card with XML quick toggle -->
   <div class="col-12">
     <div class="card-glass p-3">
       <form method="GET" action="/commits" class="row g-3 align-items-end">
@@ -71,6 +71,24 @@
             <i class="bi bi-x-lg"></i>
           </a>
         </div>
+
+        <div class="col-12 mt-2 pt-2 border-top border-secondary border-opacity-25 d-flex flex-wrap align-items-center justify-content-between gap-3">
+          <div class="form-check form-switch mb-0">
+            <input class="form-check-input" type="checkbox" role="switch" id="only_xml" name="only_xml" value="true" {% if only_xml %}checked{% endif %} onchange="this.form.submit()">
+            <label class="form-check-label text-warning small fw-semibold d-flex align-items-center gap-1" for="only_xml">
+              <i class="bi bi-filetype-xml"></i> Filtrar apenas commits com alterações em arquivos XML
+            </label>
+          </div>
+          {% if xml_commits_count > 0 %}
+          <div class="d-flex align-items-center gap-2 small">
+            <span class="text-muted">Total de XMLs no período:</span>
+            <span class="badge bg-warning text-dark fw-bold">{{ total_xml_files }} arquivos</span>
+            <span class="badge bg-success-subtle text-success border border-success-subtle">+{{ total_xml_ins }}</span>
+            <span class="badge bg-danger-subtle text-danger border border-danger-subtle">-{{ total_xml_del }}</span>
+            <span class="badge bg-info-subtle text-info border border-info-subtle">{{ total_xml_edits }} edições totais</span>
+          </div>
+          {% endif %}
+        </div>
       </form>
     </div>
   </div>
@@ -81,6 +99,7 @@
       <div class="p-3 border-bottom border-secondary border-opacity-25 d-flex justify-content-between align-items-center">
         <span class="text-muted small">
           Exibindo <b class="text-light">{{ commits|length }}</b> commits encontrados no PostgreSQL
+          {% if only_xml %}<span class="badge bg-warning text-dark ms-2">Filtro XML Ativo</span>{% endif %}
         </span>
       </div>
 
@@ -93,7 +112,7 @@
               <th style="width: 220px;">Autor</th>
               <th style="width: 160px;">Repositório</th>
               <th>Mensagem do Commit</th>
-              <th style="width: 130px;" class="text-center">Arquivos</th>
+              <th style="width: 200px;" class="text-center">Arquivos / XMLs</th>
             </tr>
           </thead>
           <tbody>
@@ -123,13 +142,20 @@
                   <div class="text-light">{{ commit.message }}</div>
                 </td>
                 <td class="text-center">
-                  {% if commit.files_changed %}
-                  <button type="button" class="btn btn-sm btn-secondary-custom py-1 px-2 small" onclick='viewFiles("{{ commit.hash }}", {{ commit.files_changed|tojson }})'>
-                    <i class="bi bi-file-code me-1 text-info"></i> {{ commit.files_count }} arq
-                  </button>
-                  {% else %}
-                  <span class="text-muted small">-</span>
-                  {% endif %}
+                  <div class="d-flex align-items-center justify-content-center gap-1 flex-wrap">
+                    {% if commit.has_xml_changes %}
+                    <span class="badge bg-warning text-dark" title="{{ commit.xml_files_count }} arquivo(s) XML: +{{ commit.xml_insertions }} / -{{ commit.xml_deletions }} edições">
+                      <i class="bi bi-filetype-xml"></i> {{ commit.xml_files_count }} (+{{ commit.xml_insertions }}/-{{ commit.xml_deletions }})
+                    </span>
+                    {% endif %}
+                    {% if commit.files_changed %}
+                    <button type="button" class="btn btn-sm btn-secondary-custom py-1 px-2 small" onclick='viewFiles("{{ commit.hash }}", {{ commit.files_changed|tojson }})'>
+                      <i class="bi bi-file-code me-1 text-info"></i> {{ commit.files_count }} arq
+                    </button>
+                    {% else %}
+                    <span class="text-muted small">-</span>
+                    {% endif %}
+                  </div>
                 </td>
               </tr>
               {% endfor %}

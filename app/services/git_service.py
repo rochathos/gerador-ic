@@ -115,17 +115,36 @@ class GitService:
                     if author_query not in author_name and author_query not in author_email:
                         continue
 
-                # Get changed files safely
-                files_changed: List[str] = []
+                # Get changed files with diff metrics (insertions, deletions, lines)
+                files_changed: List[Dict[str, Any]] = []
                 try:
                     stats = commit.stats
-                    files_changed = list(stats.files.keys())
+                    for file_path, file_stat in stats.files.items():
+                        is_xml = file_path.lower().endswith(".xml")
+                        files_changed.append({
+                            "path": file_path,
+                            "filename": file_path.replace("\\", "/").split("/")[-1],
+                            "is_xml": is_xml,
+                            "insertions": file_stat.get("insertions", 0),
+                            "deletions": file_stat.get("deletions", 0),
+                            "lines": file_stat.get("lines", 0),
+                        })
                 except Exception as stat_err:
                     logger.debug(f"Não foi possível obter stats do commit {commit.hexsha[:7]}: {stat_err}")
                     try:
                         if commit.parents:
                             diff = commit.diff(commit.parents[0])
-                            files_changed = [d.a_path or d.b_path for d in diff if d.a_path or d.b_path]
+                            for d in diff:
+                                target_path = d.a_path or d.b_path
+                                if target_path:
+                                    files_changed.append({
+                                        "path": target_path,
+                                        "filename": target_path.replace("\\", "/").split("/")[-1],
+                                        "is_xml": target_path.lower().endswith(".xml"),
+                                        "insertions": 0,
+                                        "deletions": 0,
+                                        "lines": 0,
+                                    })
                     except Exception:
                         files_changed = []
 

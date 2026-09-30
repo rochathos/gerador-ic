@@ -154,9 +154,10 @@ def commits_view(
     start_date: Optional[str] = Query(None),
     end_date: Optional[str] = Query(None),
     q: Optional[str] = Query(None),
+    only_xml: Optional[bool] = Query(False),
     db: Session = Depends(get_db),
 ):
-    """Render full commits table with filtering capabilities."""
+    """Render full commits table with filtering capabilities and XML diff analysis."""
     stmt = select(Commit)
 
     if repo_name:
@@ -190,6 +191,16 @@ def commits_view(
     stmt = stmt.order_by(desc(Commit.commit_date))
     commits = list(db.execute(stmt).scalars().all())
 
+    # Calculate global XML stats before filtering if only_xml is toggled
+    xml_commits_count = sum(1 for c in commits if c.has_xml_changes)
+    total_xml_files = sum(c.xml_files_count for c in commits)
+    total_xml_ins = sum(c.xml_insertions for c in commits)
+    total_xml_del = sum(c.xml_deletions for c in commits)
+    total_xml_edits = sum(c.xml_total_edits for c in commits)
+
+    if only_xml:
+        commits = [c for c in commits if c.has_xml_changes]
+
     # Get list of distinct repository names
     repo_stmt = select(Commit.repo_name).distinct().where(Commit.repo_name.is_not(None))
     available_repos = [r for r in db.execute(repo_stmt).scalars().all() if r]
@@ -205,6 +216,12 @@ def commits_view(
             "filter_start_date": start_date or "",
             "filter_end_date": end_date or "",
             "filter_query": q or "",
+            "only_xml": only_xml,
+            "xml_commits_count": xml_commits_count,
+            "total_xml_files": total_xml_files,
+            "total_xml_ins": total_xml_ins,
+            "total_xml_del": total_xml_del,
+            "total_xml_edits": total_xml_edits,
             "author_name": settings.GIT_AUTHOR_NAME,
         },
     )

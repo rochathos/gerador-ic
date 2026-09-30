@@ -83,3 +83,29 @@ def test_execute_analysis_and_persistence(db_session):
     db_history = db_session.get(ExecutionHistory, history.id)
     assert db_history is not None
     assert len(db_history.commits) == history.total_commits
+
+
+def test_xml_files_metrics(db_session):
+    """Test detection and counting of XML file edits and line modifications."""
+    now = datetime.now(timezone.utc)
+    start_date = now - timedelta(days=1)
+    end_date = now + timedelta(days=1)
+
+    history, saved_commits = GitService.execute_analysis(
+        db=db_session,
+        repo_path=settings.BASE_DIR,
+        start_date=start_date,
+        end_date=end_date,
+        author="athos",
+    )
+
+    xml_commits = [c for c in saved_commits if c.has_xml_changes]
+    assert len(xml_commits) >= 2
+
+    # Check the latest commit which had 10 additions and 3 deletions
+    latest_xml = xml_commits[-1]
+    assert latest_xml.xml_files_count == 1
+    assert latest_xml.xml_insertions == 10
+    assert latest_xml.xml_deletions == 3
+    assert latest_xml.xml_total_edits == 13
+    assert latest_xml.xml_files[0]["filename"] == "database-changelog.xml"

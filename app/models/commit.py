@@ -42,3 +42,43 @@ class Commit(Base):
         if isinstance(self.files_changed, dict):
             return len(self.files_changed.keys())
         return 0
+
+    @property
+    def xml_files(self) -> List[Any]:
+        """Return list of modified XML files with their diff metrics."""
+        results = []
+        if isinstance(self.files_changed, list):
+            for item in self.files_changed:
+                if isinstance(item, dict):
+                    if item.get("is_xml") or str(item.get("path", "")).lower().endswith(".xml"):
+                        results.append(item)
+                elif isinstance(item, str) and item.lower().endswith(".xml"):
+                    results.append({
+                        "path": item,
+                        "filename": item.split("/")[-1].split("\\")[-1],
+                        "is_xml": True,
+                        "insertions": 0,
+                        "deletions": 0,
+                        "lines": 0,
+                    })
+        return results
+
+    @property
+    def xml_files_count(self) -> int:
+        return len(self.xml_files)
+
+    @property
+    def xml_insertions(self) -> int:
+        return sum(f.get("insertions", 0) for f in self.xml_files)
+
+    @property
+    def xml_deletions(self) -> int:
+        return sum(f.get("deletions", 0) for f in self.xml_files)
+
+    @property
+    def xml_total_edits(self) -> int:
+        return self.xml_insertions + self.xml_deletions
+
+    @property
+    def has_xml_changes(self) -> bool:
+        return self.xml_files_count > 0

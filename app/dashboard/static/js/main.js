@@ -135,12 +135,68 @@ function viewFiles(commitHash, filesJson) {
   if (!files || files.length === 0) {
     modalBody.innerHTML = '<p class="text-muted">Nenhum arquivo listado ou alterado.</p>';
   } else {
-    let listHtml = '<ul class="list-group list-group-flush bg-transparent">';
+    // Check if any XML files exist and sum their stats
+    let xmlCount = 0;
+    let totalXmlIns = 0;
+    let totalXmlDel = 0;
+    let totalXmlLines = 0;
+
     files.forEach(f => {
+      const isXml = typeof f === "object" ? f.is_xml : String(f).toLowerCase().endsWith(".xml");
+      if (isXml) {
+        xmlCount++;
+        if (typeof f === "object") {
+          totalXmlIns += (f.insertions || 0);
+          totalXmlDel += (f.deletions || 0);
+          totalXmlLines += (f.lines || 0);
+        }
+      }
+    });
+
+    let headerHtml = "";
+    if (xmlCount > 0) {
+      headerHtml = `
+        <div class="card-glass p-3 mb-3 border-warning border-opacity-50 bg-warning bg-opacity-10 rounded-3">
+          <div class="d-flex flex-wrap align-items-center justify-content-between gap-2">
+            <div class="d-flex align-items-center gap-2">
+              <i class="bi bi-filetype-xml fs-4 text-warning"></i>
+              <div>
+                <div class="fw-bold text-warning small">CONTAGEM PARA ICs (ARQUIVOS XML)</div>
+                <div class="small text-light">${xmlCount} arquivo(s) XML alterado(s) neste commit</div>
+              </div>
+            </div>
+            <div class="d-flex gap-2">
+              <span class="badge bg-success-subtle text-success border border-success-subtle px-2 py-1">+${totalXmlIns} adições</span>
+              <span class="badge bg-danger-subtle text-danger border border-danger-subtle px-2 py-1">-${totalXmlDel} remoções</span>
+              <span class="badge bg-warning text-dark fw-bold px-2 py-1">${totalXmlLines} edições totais</span>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    let listHtml = headerHtml + '<ul class="list-group list-group-flush bg-transparent gap-2">';
+    files.forEach(f => {
+      const isObj = typeof f === "object";
+      const filePath = isObj ? (f.path || f.filename) : String(f);
+      const isXml = isObj ? f.is_xml : filePath.toLowerCase().endsWith(".xml");
+      const ins = isObj ? (f.insertions || 0) : 0;
+      const del = isObj ? (f.deletions || 0) : 0;
+      const lines = isObj ? (f.lines || 0) : 0;
+
       listHtml += `
-        <li class="list-group-item bg-transparent text-light border-secondary d-flex align-items-center gap-2 py-2">
-          <i class="bi bi-file-earmark-code text-info"></i>
-          <span class="font-monospace small">${f}</span>
+        <li class="list-group-item bg-dark bg-opacity-50 rounded-2 border ${isXml ? 'border-warning border-opacity-50' : 'border-secondary border-opacity-25'} p-2 d-flex flex-wrap align-items-center justify-content-between gap-2">
+          <div class="d-flex align-items-center gap-2 text-truncate" style="max-width: 65%;">
+            ${isXml ? '<span class="badge bg-warning text-dark fw-bold" style="font-size:0.7rem;"><i class="bi bi-filetype-xml"></i> XML</span>' : '<i class="bi bi-file-earmark-code text-info"></i>'}
+            <span class="font-monospace small ${isXml ? 'text-warning fw-semibold' : 'text-light'} text-truncate" title="${filePath}">${filePath}</span>
+          </div>
+          <div class="d-flex align-items-center gap-1 font-monospace" style="font-size: 0.8rem;">
+            ${isObj && (ins > 0 || del > 0 || lines > 0) ? `
+              <span class="badge bg-success-subtle text-success border border-success-subtle px-2 py-1" title="Linhas inseridas">+${ins}</span>
+              <span class="badge bg-danger-subtle text-danger border border-danger-subtle px-2 py-1" title="Linhas deletadas">-${del}</span>
+              <span class="badge bg-secondary-subtle text-light border border-secondary px-2 py-1" title="Total de edições">${lines} edições</span>
+            ` : '<span class="text-muted small">Modificado</span>'}
+          </div>
         </li>
       `;
     });
