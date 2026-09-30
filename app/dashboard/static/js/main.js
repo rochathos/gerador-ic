@@ -210,3 +210,240 @@ function viewFiles(commitHash, filesJson) {
     modal.show();
   }
 }
+
+/**
+ * Global variable for modal commit state
+ */
+let currentModalCommit = null;
+
+/**
+ * Open Create Catalog Item (IC) Modal for a specific commit
+ */
+function openCreateICModal(commitData) {
+  let commit = commitData;
+  if (typeof commit === "string") {
+    try {
+      commit = JSON.parse(commitData);
+    } catch (e) {
+      console.error("Erro ao converter dados do commit:", e);
+      return;
+    }
+  }
+
+  currentModalCommit = commit;
+
+  const modalEl = document.getElementById("createICModal");
+  if (!modalEl) return;
+
+  const badgeEl = document.getElementById("icCommitBadge");
+  const titleEl = document.getElementById("icInputTitle");
+  const descEl = document.getElementById("icInputDesc");
+  const alertEl = document.getElementById("icFeedbackAlert");
+  const alertText = document.getElementById("icFeedbackText");
+  const saveBtn = document.getElementById("btnSaveICToDB");
+
+  // Reset feedback alert and save button
+  if (alertEl) {
+    alertEl.classList.add("d-none");
+    alertEl.classList.remove("alert-danger");
+    alertEl.classList.add("alert-success");
+  }
+  if (alertText) {
+    alertText.textContent = "";
+  }
+  if (saveBtn) {
+    saveBtn.disabled = false;
+    saveBtn.innerHTML = '<i class="bi bi-database-add"></i> Salvar no Banco';
+    saveBtn.className = "btn btn-outline-success d-flex align-items-center gap-1";
+  }
+
+  // Populate badge
+  const shortHash = commit.short_hash || (commit.hash ? commit.hash.substring(0, 7) : "");
+  if (badgeEl) {
+    badgeEl.textContent = `Commit ${shortHash}`;
+  }
+
+  // Populate title
+  let icTitle = commit.ic_title;
+  if (!icTitle && commit.message) {
+    icTitle = commit.message.split("\n")[0].trim().substring(0, 180);
+  }
+  if (titleEl) {
+    titleEl.value = icTitle || "Atividade de Desenvolvimento";
+  }
+
+  // Populate description
+  let icDesc = commit.ic_description;
+  if (!icDesc) {
+    const dateStr = commit.commit_date || "";
+    const author = commit.author || "";
+    const url = commit.commit_url || "";
+    const lines = [
+      `Commit: ${shortHash}`,
+      `Data: ${dateStr}`,
+      `Autor: ${author}`
+    ];
+    if (url) lines.push(`Link: ${url}`);
+    lines.push("");
+    lines.push("Descrição:");
+    lines.push((commit.message || "").trim());
+
+    if (commit.files_changed && commit.files_changed.length > 0) {
+      lines.push("");
+      lines.push("Arquivos Alterados:");
+      let xmlCount = 0;
+      commit.files_changed.forEach(f => {
+        const isObj = typeof f === "object";
+        const path = isObj ? (f.path || f.filename) : String(f);
+        const isXml = isObj ? f.is_xml : path.toLowerCase().endsWith(".xml");
+        const ins = isObj ? (f.insertions || 0) : 0;
+        const del = isObj ? (f.deletions || 0) : 0;
+        const diff = (ins || del) ? ` (+${ins} / -${del})` : "";
+        if (isXml) {
+          xmlCount++;
+          lines.push(`- [XML] ${path}${diff}`);
+        } else {
+          lines.push(`- ${path}${diff}`);
+        }
+      });
+      if (xmlCount > 0) {
+        lines.push(`(Total de arquivos XML alterados: ${xmlCount})`);
+      }
+    }
+    icDesc = lines.join("\n");
+  }
+
+  if (descEl) {
+    descEl.value = icDesc;
+  }
+
+  const modal = new bootstrap.Modal(modalEl);
+  modal.show();
+}
+
+/**
+ * Copy individual modal field (Title or Description) to clipboard
+ */
+async function copyModalField(fieldId, btn) {
+  const field = document.getElementById(fieldId);
+  if (!field) return;
+
+  try {
+    await navigator.clipboard.writeText(field.value);
+    const origHtml = btn.innerHTML;
+    btn.innerHTML = '<i class="bi bi-check2 text-success"></i> Copiado!';
+    setTimeout(() => {
+      btn.innerHTML = origHtml;
+    }, 1500);
+  } catch (err) {
+    console.error("Erro ao copiar campo:", err);
+  }
+}
+
+/**
+ * Copy full IC format (Title + Description) directly for Redmine
+ */
+async function copyFullICToRedmine(btn) {
+  const titleEl = document.getElementById("icInputTitle");
+  const descEl = document.getElementById("icInputDesc");
+  const alertEl = document.getElementById("icFeedbackAlert");
+  const alertText = document.getElementById("icFeedbackText");
+
+  const title = titleEl ? titleEl.value.trim() : "";
+  const desc = descEl ? descEl.value.trim() : "";
+
+  const fullText = `TÍTULO:\n${title}\n\nDESCRIÇÃO:\n${desc}`;
+
+  try {
+    await navigator.clipboard.writeText(fullText);
+    if (btn) {
+      const origHtml = btn.innerHTML;
+      btn.innerHTML = '<i class="bi bi-check2 text-white"></i> Copiado!';
+      setTimeout(() => {
+        btn.innerHTML = origHtml;
+      }, 1800);
+    }
+    if (alertEl && alertText) {
+      alertEl.classList.remove("d-none", "alert-danger");
+      alertEl.classList.add("alert-success");
+      alertText.textContent = "Título e descrição copiados com sucesso! Cole diretamente no Redmine.";
+    }
+  } catch (err) {
+    console.error("Erro ao copiar IC completo:", err);
+  }
+}
+
+/**
+ * Save the created IC into PostgreSQL database via /api/create-ic
+ */
+async function saveICToDatabase(btn) {
+  const titleEl = document.getElementById("icInputTitle");
+  const descEl = document.getElementById("icInputDesc");
+  const alertEl = document.getElementById("icFeedbackAlert");
+  const alertText = document.getElementById("icFeedbackText");
+
+  const title = titleEl ? titleEl.value.trim() : "";
+  const description = descEl ? descEl.value.trim() : "";
+
+  if (!title) {
+    if (alertEl && alertText) {
+      alertEl.classList.remove("d-none", "alert-success");
+      alertEl.classList.add("alert-danger");
+      alertText.textContent = "Por favor, informe o título do Item de Catálogo.";
+    }
+    return;
+  }
+
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span> Salvando...';
+  }
+
+  try {
+    const res = await fetch("/api/create-ic", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        title: title,
+        description: description,
+        status: "sugerido",
+      }),
+    });
+
+    const data = await res.json();
+    if (data.success) {
+      if (btn) {
+        btn.className = "btn btn-success d-flex align-items-center gap-1";
+        btn.innerHTML = '<i class="bi bi-check-circle-fill"></i> Salvo no Banco';
+      }
+      if (alertEl && alertText) {
+        alertEl.classList.remove("d-none", "alert-danger");
+        alertEl.classList.add("alert-success");
+        alertText.textContent = `Item de Catálogo #${data.id} salvo com sucesso no banco de dados!`;
+      }
+    } else {
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-database-add"></i> Tentar Novamente';
+      }
+      if (alertEl && alertText) {
+        alertEl.classList.remove("d-none", "alert-success");
+        alertEl.classList.add("alert-danger");
+        alertText.textContent = `Erro ao salvar: ${data.message}`;
+      }
+    }
+  } catch (err) {
+    console.error("Erro na requisição /api/create-ic:", err);
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="bi bi-database-add"></i> Tentar Novamente';
+    }
+    if (alertEl && alertText) {
+      alertEl.classList.remove("d-none", "alert-success");
+      alertEl.classList.add("alert-danger");
+      alertText.textContent = `Erro de comunicação com o servidor: ${err.message}`;
+    }
+  }
+}

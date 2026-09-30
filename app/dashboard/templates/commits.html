@@ -108,11 +108,12 @@
           <thead>
             <tr>
               <th style="width: 130px;">Hash</th>
-              <th style="width: 170px;">Data / Hora</th>
-              <th style="width: 220px;">Autor</th>
-              <th style="width: 160px;">Repositório</th>
+              <th style="width: 160px;">Data / Hora</th>
+              <th style="width: 200px;">Autor</th>
+              <th style="width: 150px;">Repositório</th>
               <th>Mensagem do Commit</th>
-              <th style="width: 200px;" class="text-center">Arquivos / XMLs</th>
+              <th style="width: 180px;" class="text-center">Arquivos / XMLs</th>
+              <th style="width: 120px;" class="text-center">Criar IC</th>
             </tr>
           </thead>
           <tbody>
@@ -137,7 +138,7 @@
                   </div>
                 </td>
                 <td class="text-muted small">
-                  {{ commit.commit_date.strftime("%d/%m/%Y %H:%M") }}
+                  {{ commit.commit_date.strftime("%d/%m/%Y %H:%M") if commit.commit_date.strftime is defined else commit.commit_date }}
                 </td>
                 <td>
                   <div class="fw-medium text-light small">{{ commit.author }}</div>
@@ -166,11 +167,19 @@
                     {% endif %}
                   </div>
                 </td>
+                <td class="text-center">
+                  <button type="button" class="btn btn-sm btn-primary-custom py-1 px-2 small d-inline-flex align-items-center gap-1"
+                          onclick='openCreateICModal({{ commit.to_dict()|tojson }})'
+                          title="Gerar Item de Catálogo (IC) para este commit">
+                    <i class="bi bi-card-checklist"></i>
+                    <span>Criar IC</span>
+                  </button>
+                </td>
               </tr>
               {% endfor %}
             {% else %}
               <tr>
-                <td colspan="6" class="text-center py-5 text-muted">
+                <td colspan="7" class="text-center py-5 text-muted">
                   <i class="bi bi-inbox fs-2 d-block mb-2 text-dim"></i>
                   Nenhum commit encontrado para os filtros selecionados.
                 </td>

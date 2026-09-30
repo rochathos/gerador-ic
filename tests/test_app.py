@@ -44,12 +44,13 @@ def test_history_page():
 
 
 def test_analyze_endpoint():
-    """Test analyzing period via POST /analyze."""
+    """Test analyzing period via POST /analyze (live query vs db save)."""
     now = datetime.now()
     start_str = (now - timedelta(days=2)).strftime("%Y-%m-%dT%H:%M")
     end_str = (now + timedelta(days=1)).strftime("%Y-%m-%dT%H:%M")
 
-    response = client.post(
+    # 1. Live query without save_to_db (default)
+    response_live = client.post(
         "/analyze",
         data={
             "start_date": start_str,
@@ -59,9 +60,40 @@ def test_analyze_endpoint():
         },
         follow_redirects=False,
     )
+    assert response_live.status_code == 303
+    assert "start_date=" in response_live.headers["location"]
 
-    assert response.status_code == 303
-    assert "alert_type=success" in response.headers["location"]
+    # 2. Query with save_to_db = true
+    response_save = client.post(
+        "/analyze",
+        data={
+            "start_date": start_str,
+            "end_date": end_str,
+            "repo_path": str(settings.BASE_DIR),
+            "author": "athos",
+            "save_to_db": "true",
+        },
+        follow_redirects=False,
+    )
+    assert response_save.status_code == 303
+    assert "alert_type=success" in response_save.headers["location"]
+
+
+def test_create_single_ic_endpoint():
+    """Test creating an individual IC via POST /api/create-ic."""
+    response = client.post(
+        "/api/create-ic",
+        json={
+            "title": "Ajuste de teste individual",
+            "description": "Commit: 1234567\nData: 30/09/2026\nAutor: athos.rocha",
+            "status": "sugerido",
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["success"] is True
+    assert "id" in data
+    assert data["title"] == "Ajuste de teste individual"
 
 
 def test_export_excel():

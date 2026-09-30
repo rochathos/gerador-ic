@@ -2,7 +2,7 @@ from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Optional, List
 from fastapi import APIRouter, Depends, Form, Request, Query
-from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 from sqlalchemy import select, func, desc, or_
@@ -38,29 +38,90 @@ def _get_default_period():
 @router.get("/", response_class=HTMLResponse)
 def home_view(
     request: Request,
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
+    repo_path: Optional[str] = Query(None),
+    author: Optional[str] = Query(None),
     alert_message: Optional[str] = None,
     alert_type: Optional[str] = "info",
     db: Session = Depends(get_db),
 ):
-    """Render main dashboard view."""
+    """Render main dashboard view.
+
+    If start_date and end_date are provided, queries Git directly in real-time
+    without saving to the database.
+    """
     start_dt, end_dt = _get_default_period()
 
     # Query latest execution
     stmt_exec = select(ExecutionHistory).order_by(desc(ExecutionHistory.created_at)).limit(1)
     latest_exec = db.execute(stmt_exec).scalar_one_or_none()
 
-    # If there was a previous execution, use its dates by default
-    if latest_exec:
-        start_date_val = latest_exec.start_date.strftime("%Y-%m-%dT%H:%M")
-        end_date_val = latest_exec.end_date.strftime("%Y-%m-%dT%H:%M")
-    else:
-        start_date_val = start_dt.strftime("%Y-%m-%dT%H:%M")
-        end_date_val = end_dt.strftime("%Y-%m-%dT%H:%M")
+    active_repo = repo_path.strip() if repo_path else settings.DEFAULT_GIT_REPO_PATH
+    active_author = author.strip() if author is not None else (settings.GIT_AUTHOR_NAME or "")
 
-    repo_path_val = settings.DEFAULT_GIT_REPO_PATH or (latest_exec.repo_path if latest_exec else "")
+    commits = []
+    is_live_query = False
+
+    # Check if user performed a search/consultation
+    if start_date and end_date:
+        try:
+            s_dt = datetime.fromisoformat(start_date)
+            e_dt = datetime.fromisoformat(end_date)
+            start_date_val = start_date
+            end_date_val = end_date
+
+            is_valid, msg = GitService.validate_repository(active_repo)
+            if is_valid:
+                raw_commits = GitService.get_commits(
+                    repo_path=active_repo,
+                    start_date=s_dt,
+                    end_date=e_dt,
+                    author=active_author if active_author else None,
+                )
+                from app.models.commit import CommitItem
+                commits = [CommitItem(c) for c in raw_commits]
+                is_live_query = True
+                alert_message = alert_message or f"Consulta realizada diretamente no Git: {len(commits)} commits encontrados (nenhum dado salvo no banco)."
+                alert_type = "info"
+            else:
+                alert_message = msg
+                alert_type = "warning"
+        except Exception as exc:
+            logger.error(f"Erro ao processar consulta de período: {exc}")
+            alert_message = f"Erro na consulta: {str(exc)}"
+            alert_type = "danger"
+            start_date_val = start_dt.strftime("%Y-%m-%dT%H:%M")
+            end_date_val = end_dt.strftime("%Y-%m-%dT%H:%M")
+    else:
+        # Default view
+        if latest_exec:
+            start_date_val = latest_exec.start_date.strftime("%Y-%m-%dT%H:%M")
+            end_date_val = latest_exec.end_date.strftime("%Y-%m-%dT%H:%M")
+        else:
+            start_date_val = start_dt.strftime("%Y-%m-%dT%H:%M")
+            end_date_val = end_dt.strftime("%Y-%m-%dT%H:%M")
+
+        # By default, check if we have commits in DB, otherwise query Git for recent commits
+        stmt_commits = select(Commit).order_by(desc(Commit.commit_date)).limit(15)
+        commits = list(db.execute(stmt_commits).scalars().all())
+
+        if not commits and Path(active_repo).exists():
+            try:
+                raw_commits = GitService.get_commits(
+                    repo_path=active_repo,
+                    start_date=start_dt,
+                    end_date=end_dt,
+                    author=active_author if active_author else None,
+                )
+                from app.models.commit import CommitItem
+                commits = [CommitItem(c) for c in raw_commits]
+                is_live_query = True
+            except Exception:
+                pass
 
     # Fetch metric totals
-    total_commits = db.execute(select(func.count(Commit.id))).scalar() or 0
+    total_commits = len(commits) if is_live_query else (db.execute(select(func.count(Commit.id))).scalar() or 0)
     total_meetings = db.execute(select(func.count(Meeting.id))).scalar() or 0
     total_suggested_ics = (
         db.execute(select(func.count(CatalogItem.id)).where(CatalogItem.status == "sugerido")).scalar() or 0
@@ -69,10 +130,6 @@ def home_view(
         db.execute(select(func.count(CatalogItem.id)).where(CatalogItem.status == "criado")).scalar() or 0
     )
 
-    # Fetch recent commits
-    stmt_commits = select(Commit).order_by(desc(Commit.commit_date)).limit(15)
-    commits = list(db.execute(stmt_commits).scalars().all())
-
     return templates.TemplateResponse(
         request=request,
         name="index.html",
@@ -80,14 +137,15 @@ def home_view(
             "active_page": "home",
             "start_date_val": start_date_val,
             "end_date_val": end_date_val,
-            "repo_path_val": repo_path_val,
-            "author_val": settings.GIT_AUTHOR_NAME or "",
+            "repo_path_val": active_repo,
+            "author_val": active_author,
             "latest_execution": latest_exec,
             "total_commits": total_commits,
             "total_meetings": total_meetings,
             "total_suggested_ics": total_suggested_ics,
             "total_created_ics": total_created_ics,
             "commits": commits,
+            "is_live_query": is_live_query,
             "alert_message": alert_message,
             "alert_type": alert_type,
             "author_name": settings.GIT_AUTHOR_NAME,
@@ -102,9 +160,10 @@ def analyze_period(
     end_date: str = Form(...),
     repo_path: str = Form(...),
     author: Optional[str] = Form(None),
+    save_to_db: Optional[bool] = Form(False),
     db: Session = Depends(get_db),
 ):
-    """Run extraction pipeline for commits in specified period and repo."""
+    """Handle period search. By default queries Git without writing to DB."""
     try:
         start_dt = datetime.fromisoformat(start_date)
         end_dt = datetime.fromisoformat(end_date)
@@ -124,27 +183,84 @@ def analyze_period(
             status_code=303,
         )
 
+    # If save_to_db was explicitly requested
+    if save_to_db:
+        try:
+            history, saved_commits = GitService.execute_analysis(
+                db=db,
+                repo_path=clean_path,
+                start_date=start_dt,
+                end_date=end_dt,
+                author=author.strip() if author else None,
+            )
+            msg = f"Sucesso! {len(saved_commits)} commits encontrados e persistidos no PostgreSQL (Execução #{history.id})."
+            return RedirectResponse(
+                url=f"/?alert_message={msg}&alert_type=success",
+                status_code=303,
+            )
+        except Exception as exc:
+            logger.error(f"Erro durante execução da análise: {exc}")
+            return RedirectResponse(
+                url=f"/?alert_message=Erro+ao+executar+análise:+{str(exc)}&alert_type=danger",
+                status_code=303,
+            )
+
+    # Default: Real-time query without saving to database
+    author_param = f"&author={author.strip()}" if author else ""
+    return RedirectResponse(
+        url=f"/?start_date={start_date}&end_date={end_date}&repo_path={clean_path}{author_param}",
+        status_code=303,
+    )
+
+
+@router.post("/api/create-ic")
+async def create_single_ic(
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Save an individual Catalog Item (1 IC created for a commit)."""
     try:
-        history, saved_commits = GitService.execute_analysis(
-            db=db,
-            repo_path=clean_path,
-            start_date=start_dt,
-            end_date=end_dt,
-            author=author.strip() if author else None,
-        )
+        content_type = request.headers.get("content-type", "")
+        if "application/json" in content_type:
+            payload = await request.json()
+            title = payload.get("title", "")
+            description = payload.get("description", "")
+            status = payload.get("status", "sugerido")
+        else:
+            form_data = await request.form()
+            title = form_data.get("title", "")
+            description = form_data.get("description", "")
+            status = form_data.get("status", "sugerido")
 
-        msg = f"Sucesso! {len(saved_commits)} commits encontrados e persistidos no PostgreSQL (Execução #{history.id})."
-        return RedirectResponse(
-            url=f"/?alert_message={msg}&alert_type=success",
-            status_code=303,
-        )
+        if not title:
+            return JSONResponse(
+                status_code=400,
+                content={"success": False, "message": "Título do IC é obrigatório."},
+            )
 
+        item = CatalogItem(
+            title=str(title).strip(),
+            description=str(description).strip() if description else "",
+            status=str(status) if status else "sugerido",
+        )
+        db.add(item)
+        db.commit()
+        db.refresh(item)
+        logger.info(f"IC individual #{item.id} criado com sucesso: {item.title[:50]}")
+        return JSONResponse(
+            status_code=200,
+            content={
+                "success": True,
+                "id": item.id,
+                "title": item.title,
+                "message": f"Item de Catálogo #{item.id} salvo com sucesso no banco de dados!",
+            },
+        )
     except Exception as exc:
-        logger.error(f"Erro durante execução da análise: {exc}")
-        return RedirectResponse(
-            url=f"/?alert_message=Erro+ao+executar+análise:+{str(exc)}&alert_type=danger",
-            status_code=303,
-        )
+        db.rollback()
+        logger.error(f"Erro ao salvar IC: {exc}")
+        return JSONResponse(status_code=500, content={"success": False, "message": str(exc)})
+
 
 
 @router.get("/commits", response_class=HTMLResponse)
@@ -200,6 +316,32 @@ def commits_view(
 
     if only_xml:
         commits = [c for c in commits if c.has_xml_changes]
+
+    # If no commits found in DB, attempt to fetch recent commits live from default repo
+    if not commits and Path(settings.DEFAULT_REPO_PATH).exists():
+        try:
+            s_dt = datetime.fromisoformat(start_date) if start_date else None
+            e_dt = datetime.fromisoformat(end_date).replace(hour=23, minute=59, second=59) if end_date else None
+            from app.models.commit import CommitItem
+            raw_commits = GitService.get_commits(
+                repo_path=settings.DEFAULT_REPO_PATH,
+                start_date=s_dt,
+                end_date=e_dt,
+                author=settings.GIT_AUTHOR_NAME or None,
+            )
+            commits = [CommitItem(c) for c in raw_commits]
+            if q:
+                ql = q.lower()
+                commits = [c for c in commits if ql in c.message.lower() or ql in c.author.lower() or ql in c.hash.lower()]
+            if only_xml:
+                commits = [c for c in commits if c.has_xml_changes]
+            xml_commits_count = sum(1 for c in commits if c.has_xml_changes)
+            total_xml_files = sum(c.xml_files_count for c in commits)
+            total_xml_ins = sum(c.xml_insertions for c in commits)
+            total_xml_del = sum(c.xml_deletions for c in commits)
+            total_xml_edits = sum(c.xml_total_edits for c in commits)
+        except Exception as exc:
+            logger.warning(f"Fallback para commits em tempo real falhou: {exc}")
 
     # Get list of distinct repository names
     repo_stmt = select(Commit.repo_name).distinct().where(Commit.repo_name.is_not(None))

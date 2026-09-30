@@ -108,6 +108,61 @@
     </div>
   </div>
 
+  <!-- Modal Criar Item de Catálogo (IC) por Commit -->
+  <div class="modal fade" id="createICModal" tabindex="-1" aria-labelledby="createICModalTitle" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+      <div class="modal-content modal-content-custom">
+        <div class="modal-header modal-header-custom">
+          <h5 class="modal-title d-flex align-items-center gap-2" id="createICModalTitle">
+            <i class="bi bi-card-checklist text-primary"></i> Item de Catálogo (IC) Gerado
+          </h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body p-4">
+          <div class="alert alert-info bg-info bg-opacity-10 border-info border-opacity-25 d-flex align-items-center justify-content-between p-2 mb-3 small">
+            <div><i class="bi bi-info-circle me-1 text-info"></i> IC gerado automaticamente a partir do commit selecionado.</div>
+            <span id="icCommitBadge" class="badge-hash"></span>
+          </div>
+
+          <div class="mb-3">
+            <div class="d-flex justify-content-between align-items-center mb-1">
+              <label for="icInputTitle" class="form-label text-muted small fw-bold mb-0">TÍTULO DO IC (REDMINE):</label>
+              <button type="button" class="btn btn-sm btn-link p-0 text-info text-decoration-none small" onclick="copyModalField('icInputTitle', this)">
+                <i class="bi bi-clipboard"></i> Copiar Título
+              </button>
+            </div>
+            <input type="text" class="form-control form-control-custom fw-semibold" id="icInputTitle">
+          </div>
+
+          <div class="mb-3">
+            <div class="d-flex justify-content-between align-items-center mb-1">
+              <label for="icInputDesc" class="form-label text-muted small fw-bold mb-0">DESCRIÇÃO DO IC (REDMINE):</label>
+              <button type="button" class="btn btn-sm btn-link p-0 text-info text-decoration-none small" onclick="copyModalField('icInputDesc', this)">
+                <i class="bi bi-clipboard"></i> Copiar Descrição
+              </button>
+            </div>
+            <textarea class="form-control form-control-custom font-monospace small" id="icInputDesc" rows="9" style="resize: vertical;"></textarea>
+          </div>
+
+          <div id="icFeedbackAlert" class="alert alert-success d-none py-2 px-3 small d-flex align-items-center gap-2">
+            <i class="bi bi-check-circle-fill"></i> <span id="icFeedbackText"></span>
+          </div>
+        </div>
+        <div class="modal-footer modal-footer-custom d-flex justify-content-between">
+          <button type="button" class="btn btn-secondary-custom" data-bs-dismiss="modal">Fechar</button>
+          <div class="d-flex gap-2">
+            <button type="button" class="btn btn-primary-custom d-flex align-items-center gap-1" onclick="copyFullICToRedmine(this)">
+              <i class="bi bi-clipboard-check"></i> Copiar Tudo para Redmine
+            </button>
+            <button type="button" class="btn btn-outline-success d-flex align-items-center gap-1" id="btnSaveICToDB" onclick="saveICToDatabase(this)">
+              <i class="bi bi-database-add"></i> Salvar no Banco
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Loading Overlay -->
   <div id="loading-overlay" class="loading-overlay">
     <div class="spinner-border text-primary mb-3" style="width: 3.5rem; height: 3.5rem;" role="status">
