@@ -74,9 +74,9 @@ def home_view(
     commits = list(db.execute(stmt_commits).scalars().all())
 
     return templates.TemplateResponse(
-        "index.html",
-        {
-            "request": request,
+        request=request,
+        name="index.html",
+        context={
             "active_page": "home",
             "start_date_val": start_date_val,
             "end_date_val": end_date_val,
@@ -195,9 +195,9 @@ def commits_view(
     available_repos = [r for r in db.execute(repo_stmt).scalars().all() if r]
 
     return templates.TemplateResponse(
-        "commits.html",
-        {
-            "request": request,
+        request=request,
+        name="commits.html",
+        context={
             "active_page": "commits",
             "commits": commits,
             "available_repos": available_repos,
@@ -217,9 +217,9 @@ def meetings_view(request: Request, db: Session = Depends(get_db)):
     meetings = list(db.execute(stmt).scalars().all())
 
     return templates.TemplateResponse(
-        "meetings.html",
-        {
-            "request": request,
+        request=request,
+        name="meetings.html",
+        context={
             "active_page": "meetings",
             "meetings": meetings,
             "author_name": settings.GIT_AUTHOR_NAME,
@@ -234,9 +234,9 @@ def catalog_items_view(request: Request, db: Session = Depends(get_db)):
     items = list(db.execute(stmt).scalars().all())
 
     return templates.TemplateResponse(
-        "catalog_items.html",
-        {
-            "request": request,
+        request=request,
+        name="catalog_items.html",
+        context={
             "active_page": "catalog_items",
             "catalog_items": items,
             "author_name": settings.GIT_AUTHOR_NAME,
@@ -290,9 +290,9 @@ def history_view(request: Request, db: Session = Depends(get_db)):
     executions = list(db.execute(stmt).scalars().all())
 
     return templates.TemplateResponse(
-        "history.html",
-        {
-            "request": request,
+        request=request,
+        name="history.html",
+        context={
             "active_page": "history",
             "executions": executions,
             "author_name": settings.GIT_AUTHOR_NAME,
