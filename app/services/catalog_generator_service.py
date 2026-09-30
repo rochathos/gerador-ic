@@ -19,6 +19,8 @@ class CatalogGeneratorService:
             commit_date = commit.get("commit_date")
             commit_url = commit.get("commit_url") or ""
             files_changed = commit.get("files_changed") or []
+            xml_tags = commit.get("xml_tags_metrics") or {}
+            ic_count = commit.get("ic_count", 0) or 0
         else:
             msg = commit.message.strip()
             commit_hash = commit.hash
@@ -27,6 +29,8 @@ class CatalogGeneratorService:
             commit_date = commit.commit_date
             commit_url = commit.web_commit_url or commit.commit_url or ""
             files_changed = commit.files_changed or []
+            xml_tags = getattr(commit, "xml_tags_metrics", {}) or {}
+            ic_count = getattr(commit, "ic_count", 0) or 0
 
         # Title: first line of commit message
         first_line = msg.split("\n")[0].strip() if msg else "Atividade de Desenvolvimento"
@@ -52,6 +56,15 @@ class CatalogGeneratorService:
         desc_lines.append("")
         desc_lines.append("Descrição:")
         desc_lines.append(msg)
+
+        # IC Calculation details based on icf.sh
+        if ic_count > 0:
+            desc_lines.append("")
+            desc_lines.append(f"Itens de Catálogo (IC) calculados: {ic_count} IC(s)")
+            if xml_tags:
+                desc_lines.append("Detalhamento das tags XML adicionadas (regra PJE):")
+                for tag, count in sorted(xml_tags.items(), key=lambda x: x[1], reverse=True):
+                    desc_lines.append(f"- <{tag}>: {count}")
 
         # Files changed and XML highlights
         if files_changed:
@@ -83,6 +96,8 @@ class CatalogGeneratorService:
             "status": "sugerido",
             "commit_hash": commit_hash,
             "commit_url": commit_url,
+            "ic_count": ic_count,
+            "xml_tags_metrics": xml_tags,
         }
 
     @classmethod

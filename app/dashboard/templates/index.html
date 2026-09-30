@@ -307,9 +307,13 @@
                 </td>
                 <td class="text-center">
                   <div class="d-flex align-items-center justify-content-center gap-1 flex-wrap">
-                    {% if commit.has_xml_changes %}
+                    {% if commit.ic_count and commit.ic_count > 0 %}
+                    <span class="badge bg-warning text-dark fw-bold" title="{{ commit.ic_count }} IC(s) calculados pelas regras do PJE (icf.sh)">
+                      <i class="bi bi-tag-fill me-1"></i>{{ commit.ic_count }} ICs
+                    </span>
+                    {% elif commit.has_xml_changes %}
                     <span class="badge bg-warning text-dark" title="{{ commit.xml_files_count }} arquivo(s) XML: +{{ commit.xml_insertions }} / -{{ commit.xml_deletions }} edições">
-                      <i class="bi bi-filetype-xml"></i> {{ commit.xml_files_count }} (+{{ commit.xml_insertions }}/-{{ commit.xml_deletions }})
+                      <i class="bi bi-filetype-xml"></i> {{ commit.xml_files_count }} XML
                     </span>
                     {% endif %}
                     {% if commit.files_changed %}
@@ -326,7 +330,7 @@
                           onclick="openCreateICByHash('{{ commit.hash }}')"
                           title="Gerar Item de Catálogo (IC) para este commit">
                     <i class="bi bi-card-checklist"></i>
-                    <span>Criar IC</span>
+                    <span>Criar IC{% if commit.ic_count and commit.ic_count > 0 %} <span class="badge bg-warning text-dark fw-bold ms-1">{{ commit.ic_count }}</span>{% endif %}</span>
                   </button>
                 </td>
               </tr>

@@ -321,6 +321,35 @@ function openCreateICModal(commitData) {
     badgeEl.textContent = `Commit ${shortHash}`;
   }
 
+  // Populate IC tags breakdown alert (icf.sh rule)
+  const tagsAlert = document.getElementById("icTagsAlert");
+  const countText = document.getElementById("icCountText");
+  const tagsDetail = document.getElementById("icTagsDetail");
+
+  const icCount = commit.ic_count || 0;
+  const tagsMap = commit.xml_tags_metrics || {};
+
+  if (tagsAlert && countText && tagsDetail) {
+    if (icCount > 0) {
+      tagsAlert.classList.remove("d-none");
+      countText.textContent = `${icCount} Item(ns) de Catálogo (IC) calculados`;
+
+      const tagEntries = Object.entries(tagsMap);
+      if (tagEntries.length > 0) {
+        tagEntries.sort((a, b) => b[1] - a[1]);
+        tagsDetail.innerHTML = tagEntries
+          .map(([t, c]) => `<span class="badge bg-warning text-dark border border-warning-subtle fw-semibold px-2 py-1">&lt;${t}&gt;: ${c}</span>`)
+          .join(" ");
+      } else {
+        tagsDetail.innerHTML = `<span class="text-muted small">Tags válidas calculadas.</span>`;
+      }
+    } else {
+      tagsAlert.classList.add("d-none");
+      countText.textContent = "";
+      tagsDetail.innerHTML = "";
+    }
+  }
+
   // Populate title
   let icTitle = commit.ic_title;
   if (!icTitle && commit.message) {

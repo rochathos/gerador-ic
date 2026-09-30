@@ -124,6 +124,16 @@
             <span id="icCommitBadge" class="badge-hash"></span>
           </div>
 
+          <!-- Detalhamento de ICs conforme regra icf.sh -->
+          <div id="icTagsAlert" class="alert alert-warning bg-warning bg-opacity-10 border-warning border-opacity-25 p-3 mb-3 small d-none">
+            <div class="fw-bold d-flex align-items-center justify-content-between text-warning mb-1">
+              <span><i class="bi bi-tag-fill me-1"></i> <span id="icCountText">0 ICs calculados</span></span>
+              <span class="badge bg-warning text-dark fw-bold">Regra icf.sh (PJE)</span>
+            </div>
+            <div class="text-muted small mb-1" style="font-size:0.75rem;">Tags XML adicionadas contabilizadas (excluindo tags estruturais):</div>
+            <div class="text-light small d-flex flex-wrap gap-1" id="icTagsDetail"></div>
+          </div>
+
           <div class="mb-3">
             <div class="d-flex justify-content-between align-items-center mb-1">
               <label for="icInputTitle" class="form-label text-muted small fw-bold mb-0">TÍTULO DO IC (REDMINE):</label>

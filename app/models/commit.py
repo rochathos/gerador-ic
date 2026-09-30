@@ -19,6 +19,8 @@ class Commit(Base):
     repo_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
     repo_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     commit_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    xml_tags_metrics: Mapped[Optional[Any]] = mapped_column(JSON, nullable=True)  # Dict of {tag: count}
+    ic_count: Mapped[int] = mapped_column(Integer, default=0, nullable=True)
     execution_id: Mapped[Optional[int]] = mapped_column(
         Integer, ForeignKey("execution_history.id", ondelete="SET NULL"), nullable=True, index=True
     )
@@ -137,6 +139,15 @@ class Commit(Base):
                     lines.append(f"- {f}")
             if xml_count > 0:
                 lines.append(f"(Total de arquivos XML alterados: {xml_count})")
+
+        if getattr(self, "ic_count", 0) and self.ic_count > 0:
+            lines.append("")
+            lines.append(f"Itens de Catálogo (IC) calculados: {self.ic_count} IC(s)")
+            if getattr(self, "xml_tags_metrics", None):
+                lines.append("Detalhamento das tags XML adicionadas (regra PJE):")
+                for tag, count in sorted(self.xml_tags_metrics.items(), key=lambda x: x[1], reverse=True):
+                    lines.append(f"- <{tag}>: {count}")
+
         return "\n".join(lines)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -156,6 +167,8 @@ class Commit(Base):
             "xml_insertions": self.xml_insertions,
             "xml_deletions": self.xml_deletions,
             "has_xml_changes": self.has_xml_changes,
+            "xml_tags_metrics": getattr(self, "xml_tags_metrics", {}) or {},
+            "ic_count": getattr(self, "ic_count", 0) or 0,
             "ic_title": self.ic_title,
             "ic_description": self.ic_description,
         }
@@ -176,6 +189,8 @@ class CommitItem:
         self.repo_name = data.get("repo_name", "")
         self.repo_path = data.get("repo_path", "")
         self.commit_url = data.get("commit_url", "")
+        self.xml_tags_metrics = data.get("xml_tags_metrics") or {}
+        self.ic_count = data.get("ic_count") or 0
 
     @property
     def short_hash(self) -> str:
@@ -271,6 +286,15 @@ class CommitItem:
                     lines.append(f"- {f}")
             if xml_count > 0:
                 lines.append(f"(Total de arquivos XML alterados: {xml_count})")
+
+        if self.ic_count and self.ic_count > 0:
+            lines.append("")
+            lines.append(f"Itens de Catálogo (IC) calculados: {self.ic_count} IC(s)")
+            if self.xml_tags_metrics:
+                lines.append("Detalhamento das tags XML adicionadas (regra PJE):")
+                for tag, count in sorted(self.xml_tags_metrics.items(), key=lambda x: x[1], reverse=True):
+                    lines.append(f"- <{tag}>: {count}")
+
         return "\n".join(lines)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -296,6 +320,8 @@ class CommitItem:
             "xml_insertions": self.xml_insertions,
             "xml_deletions": self.xml_deletions,
             "has_xml_changes": self.has_xml_changes,
+            "xml_tags_metrics": self.xml_tags_metrics or {},
+            "ic_count": self.ic_count or 0,
             "ic_title": self.ic_title,
             "ic_description": self.ic_description,
         }

@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
+import re
 import git
 from git.exc import InvalidGitRepositoryError, NoSuchPathError
 from sqlalchemy.orm import Session
@@ -13,6 +14,39 @@ from app.models.execution_history import ExecutionHistory
 
 class GitService:
     """Service to interact with local Git repositories using GitPython."""
+
+    EXCLUDED_XML_TAGS = {
+        "end-state",
+        "process-definition",
+        "start-state",
+        "condition",
+        "assignment",
+        "controller",
+        "task",
+        "script",
+        "event",
+    }
+    TAG_REGEX = re.compile(r"<([a-zA-Z_:][a-zA-Z0-9_.:-]*)")
+
+    @classmethod
+    def analyze_commit_xml_tags(cls, repo: git.Repo, commit_hash: str) -> Dict[str, Any]:
+        """Extract XML tag metrics from commit diff, following icf.sh counting rules."""
+        tags_count: Dict[str, int] = {}
+        try:
+            patch_output = repo.git.show(commit_hash, "--pretty=format:", "-p", "--", "*.xml")
+            if patch_output:
+                for line in patch_output.splitlines():
+                    if line.startswith("+") and not line.startswith("+++"):
+                        match = cls.TAG_REGEX.search(line)
+                        if match:
+                            tag = match.group(1).lower()
+                            if tag not in cls.EXCLUDED_XML_TAGS:
+                                tags_count[tag] = tags_count.get(tag, 0) + 1
+        except Exception as exc:
+            logger.debug(f"Erro ao extrair diff de tags XML para o commit {commit_hash[:7]}: {exc}")
+
+        total_ics = sum(tags_count.values())
+        return {"tags": tags_count, "total_ics": total_ics}
 
     @staticmethod
     def validate_repository(repo_path: str | Path) -> Tuple[bool, str]:
@@ -177,8 +211,15 @@ class GitService:
                     except Exception:
                         files_changed = []
 
-                commit_author_display = f"{commit.author.name} <{commit.author.email}>" if commit.author.email else commit.author.name
+                # Check for XML changes and analyze tags using icf.sh rules
+                has_xml = any(
+                    f.get("is_xml") or str(f.get("path", "")).lower().endswith(".xml")
+                    for f in files_changed
+                    if isinstance(f, dict)
+                )
+                xml_analysis = cls.analyze_commit_xml_tags(repo, commit.hexsha) if has_xml else {"tags": {}, "total_ics": 0}
 
+                commit_author_display = f"{commit.author.name} <{commit.author.email}>" if commit.author.email else commit.author.name
                 commit_url = cls.get_commit_url(path, commit.hexsha)
 
                 commits_found.append(
@@ -193,6 +234,8 @@ class GitService:
                         "repo_name": cls.get_repo_name(path),
                         "repo_path": str(path),
                         "commit_url": commit_url,
+                        "xml_tags_metrics": xml_analysis["tags"],
+                        "ic_count": xml_analysis["total_ics"],
                     }
                 )
 
@@ -231,6 +274,10 @@ class GitService:
                     existing.repo_path = item.get("repo_path")
                     if item.get("commit_url"):
                         existing.commit_url = item["commit_url"]
+                    if item.get("xml_tags_metrics") is not None:
+                        existing.xml_tags_metrics = item["xml_tags_metrics"]
+                    if item.get("ic_count") is not None:
+                        existing.ic_count = item["ic_count"]
                     saved_records.append(existing)
                 else:
                     new_commit = Commit(
@@ -242,6 +289,8 @@ class GitService:
                         repo_name=item.get("repo_name"),
                         repo_path=item.get("repo_path"),
                         commit_url=item.get("commit_url"),
+                        xml_tags_metrics=item.get("xml_tags_metrics"),
+                        ic_count=item.get("ic_count", 0),
                         execution_id=execution_id,
                     )
                     db.add(new_commit)

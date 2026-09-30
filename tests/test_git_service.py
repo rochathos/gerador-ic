@@ -109,3 +109,31 @@ def test_xml_files_metrics(db_session):
     assert latest_xml.xml_deletions == 3
     assert latest_xml.xml_total_edits == 13
     assert latest_xml.xml_files[0]["filename"] == "database-changelog.xml"
+
+
+def test_xml_tags_ic_counting():
+    """Test XML tag counting rule matching icf.sh (filtering excluded tags)."""
+    # Test exclusion set from icf.sh
+    assert "process-definition" in GitService.EXCLUDED_XML_TAGS
+    assert "start-state" in GitService.EXCLUDED_XML_TAGS
+    assert "end-state" in GitService.EXCLUDED_XML_TAGS
+    assert "condition" in GitService.EXCLUDED_XML_TAGS
+    assert "assignment" in GitService.EXCLUDED_XML_TAGS
+    assert "controller" in GitService.EXCLUDED_XML_TAGS
+    assert "task" in GitService.EXCLUDED_XML_TAGS
+    assert "script" in GitService.EXCLUDED_XML_TAGS
+    assert "event" in GitService.EXCLUDED_XML_TAGS
+
+    # Test regex tag parsing
+    line1 = '+   <transition to="fim" name="concluir"/>'
+    m1 = GitService.TAG_REGEX.search(line1)
+    assert m1 is not None
+    tag1 = m1.group(1).lower()
+    assert tag1 == "transition"
+    assert tag1 not in GitService.EXCLUDED_XML_TAGS
+
+    line2 = '+   <task name="tarefa_teste"/>'
+    m2 = GitService.TAG_REGEX.search(line2)
+    assert m2 is not None
+    tag2 = m2.group(1).lower()
+    assert tag2 in GitService.EXCLUDED_XML_TAGS
