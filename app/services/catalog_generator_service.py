@@ -2,7 +2,7 @@ from typing import List, Dict, Any, Optional
 from sqlalchemy.orm import Session
 from app.core.logger import logger
 from app.models.catalog_item import CatalogItem
-from app.models.commit import normalize_xml_metrics, format_ic_details
+from app.models.commit import normalize_xml_metrics, format_ic_details, decode_git_path
 
 
 class CatalogGeneratorService:
@@ -71,7 +71,8 @@ class CatalogGeneratorService:
             xml_count = 0
             for f in files_changed:
                 if isinstance(f, dict):
-                    path = f.get("path") or f.get("filename") or ""
+                    raw_path = f.get("path") or f.get("filename") or ""
+                    path = decode_git_path(raw_path)
                     ins = f.get("insertions", 0)
                     dels = f.get("deletions", 0)
                     diff_info = f" (+{ins} / -{dels})" if (ins or dels) else ""
@@ -81,7 +82,7 @@ class CatalogGeneratorService:
                     else:
                         desc_lines.append(f"- {path}{diff_info}")
                 else:
-                    desc_lines.append(f"- {f}")
+                    desc_lines.append(f"- {decode_git_path(str(f))}")
 
             if xml_count > 0:
                 desc_lines.append(f"(Total de arquivos XML alterados: {xml_count})")

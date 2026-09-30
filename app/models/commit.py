@@ -5,6 +5,19 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.database import Base
 
 
+def decode_git_path(path: str) -> str:
+    """Decode Git quoted paths containing octal escape sequences (e.g. \\303\\255 -> í)."""
+    if not path:
+        return ""
+    clean = str(path).strip("\"'")
+    if "\\" in clean:
+        try:
+            return clean.encode("latin1").decode("unicode_escape").encode("latin1").decode("utf-8")
+        except Exception:
+            return clean
+    return clean
+
+
 def normalize_xml_metrics(raw: Any, default_count: int = 0) -> Dict[str, Any]:
     """Normalize raw xml_tags_metrics into a standard dict containing added/removed and counts."""
     if not isinstance(raw, dict):
@@ -134,24 +147,35 @@ class Commit(Base):
         return 0
 
     @property
-    def xml_files(self) -> List[Any]:
-        """Return list of modified XML files with their diff metrics."""
-        results = []
+    def files_changed_clean(self) -> List[Dict[str, Any]]:
+        """Return files_changed with octal escapes decoded into proper UTF-8 accents."""
+        cleaned = []
         if isinstance(self.files_changed, list):
-            for item in self.files_changed:
-                if isinstance(item, dict):
-                    if item.get("is_xml") or str(item.get("path", "")).lower().endswith(".xml"):
-                        results.append(item)
-                elif isinstance(item, str) and item.lower().endswith(".xml"):
-                    results.append({
-                        "path": item,
-                        "filename": item.split("/")[-1].split("\\")[-1],
-                        "is_xml": True,
+            for f in self.files_changed:
+                if isinstance(f, dict):
+                    f_copy = dict(f)
+                    raw_path = f.get("path") or f.get("filename") or ""
+                    clean_path = decode_git_path(raw_path)
+                    f_copy["path"] = clean_path
+                    f_copy["filename"] = clean_path.split("/")[-1].split("\\")[-1]
+                    f_copy["is_xml"] = f.get("is_xml") or clean_path.lower().endswith(".xml")
+                    cleaned.append(f_copy)
+                else:
+                    clean_path = decode_git_path(str(f))
+                    cleaned.append({
+                        "path": clean_path,
+                        "filename": clean_path.split("/")[-1].split("\\")[-1],
+                        "is_xml": clean_path.lower().endswith(".xml"),
                         "insertions": 0,
                         "deletions": 0,
                         "lines": 0,
                     })
-        return results
+        return cleaned
+
+    @property
+    def xml_files(self) -> List[Any]:
+        """Return list of modified XML files with their diff metrics."""
+        return [f for f in self.files_changed_clean if f.get("is_xml")]
 
     @property
     def xml_files_count(self) -> int:
@@ -208,19 +232,16 @@ class Commit(Base):
             lines.append("")
             lines.append("Arquivos Alterados:")
             xml_count = 0
-            for f in self.files_changed:
-                if isinstance(f, dict):
-                    path = f.get("path") or f.get("filename") or ""
-                    ins = f.get("insertions", 0)
-                    dels = f.get("deletions", 0)
-                    diff_info = f" (+{ins} / -{dels})" if (ins or dels) else ""
-                    if f.get("is_xml") or path.lower().endswith(".xml"):
-                        xml_count += 1
-                        lines.append(f"- [XML] {path}{diff_info}")
-                    else:
-                        lines.append(f"- {path}{diff_info}")
+            for f in self.files_changed_clean:
+                path = f.get("path") or f.get("filename") or ""
+                ins = f.get("insertions", 0)
+                dels = f.get("deletions", 0)
+                diff_info = f" (+{ins} / -{dels})" if (ins or dels) else ""
+                if f.get("is_xml"):
+                    xml_count += 1
+                    lines.append(f"- [XML] {path}{diff_info}")
                 else:
-                    lines.append(f"- {f}")
+                    lines.append(f"- {path}{diff_info}")
             if xml_count > 0:
                 lines.append(f"(Total de arquivos XML alterados: {xml_count})")
 
@@ -239,7 +260,7 @@ class Commit(Base):
             "repo_name": self.repo_name or "",
             "repo_path": self.repo_path or "",
             "commit_url": self.web_commit_url or self.commit_url or "",
-            "files_changed": self.files_changed or [],
+            "files_changed": self.files_changed_clean,
             "files_count": self.files_count,
             "xml_files_count": self.xml_files_count,
             "xml_insertions": self.xml_insertions,
@@ -285,23 +306,35 @@ class CommitItem:
         return len(self.files_changed) if isinstance(self.files_changed, list) else 0
 
     @property
-    def xml_files(self) -> List[Any]:
-        results = []
+    def files_changed_clean(self) -> List[Dict[str, Any]]:
+        """Return files_changed with octal escapes decoded into proper UTF-8 accents."""
+        cleaned = []
         if isinstance(self.files_changed, list):
-            for item in self.files_changed:
-                if isinstance(item, dict):
-                    if item.get("is_xml") or str(item.get("path", "")).lower().endswith(".xml"):
-                        results.append(item)
-                elif isinstance(item, str) and item.lower().endswith(".xml"):
-                    results.append({
-                        "path": item,
-                        "filename": item.split("/")[-1].split("\\")[-1],
-                        "is_xml": True,
+            for f in self.files_changed:
+                if isinstance(f, dict):
+                    f_copy = dict(f)
+                    raw_path = f.get("path") or f.get("filename") or ""
+                    clean_path = decode_git_path(raw_path)
+                    f_copy["path"] = clean_path
+                    f_copy["filename"] = clean_path.split("/")[-1].split("\\")[-1]
+                    f_copy["is_xml"] = f.get("is_xml") or clean_path.lower().endswith(".xml")
+                    cleaned.append(f_copy)
+                else:
+                    clean_path = decode_git_path(str(f))
+                    cleaned.append({
+                        "path": clean_path,
+                        "filename": clean_path.split("/")[-1].split("\\")[-1],
+                        "is_xml": clean_path.lower().endswith(".xml"),
                         "insertions": 0,
                         "deletions": 0,
                         "lines": 0,
                     })
-        return results
+        return cleaned
+
+    @property
+    def xml_files(self) -> List[Any]:
+        """Return list of modified XML files with their diff metrics."""
+        return [f for f in self.files_changed_clean if f.get("is_xml")]
 
     @property
     def xml_files_count(self) -> int:
@@ -363,19 +396,16 @@ class CommitItem:
             lines.append("")
             lines.append("Arquivos Alterados:")
             xml_count = 0
-            for f in self.files_changed:
-                if isinstance(f, dict):
-                    path = f.get("path") or f.get("filename") or ""
-                    ins = f.get("insertions", 0)
-                    dels = f.get("deletions", 0)
-                    diff_info = f" (+{ins} / -{dels})" if (ins or dels) else ""
-                    if f.get("is_xml") or path.lower().endswith(".xml"):
-                        xml_count += 1
-                        lines.append(f"- [XML] {path}{diff_info}")
-                    else:
-                        lines.append(f"- {path}{diff_info}")
+            for f in self.files_changed_clean:
+                path = f.get("path") or f.get("filename") or ""
+                ins = f.get("insertions", 0)
+                dels = f.get("deletions", 0)
+                diff_info = f" (+{ins} / -{dels})" if (ins or dels) else ""
+                if f.get("is_xml"):
+                    xml_count += 1
+                    lines.append(f"- [XML] {path}{diff_info}")
                 else:
-                    lines.append(f"- {f}")
+                    lines.append(f"- {path}{diff_info}")
             if xml_count > 0:
                 lines.append(f"(Total de arquivos XML alterados: {xml_count})")
 
@@ -400,7 +430,7 @@ class CommitItem:
             "repo_name": self.repo_name or "",
             "repo_path": self.repo_path or "",
             "commit_url": self.web_commit_url or self.commit_url or "",
-            "files_changed": self.files_changed or [],
+            "files_changed": self.files_changed_clean,
             "files_count": self.files_count,
             "xml_files_count": self.xml_files_count,
             "xml_insertions": self.xml_insertions,

@@ -189,3 +189,24 @@ def test_xml_tags_ic_counting():
     assert "Tags Removidas (-2)" in rem_text
     assert "<decision>: 2" in rem_text
     assert "Tags Adicionadas" not in rem_text
+
+
+def test_decode_git_path():
+    """Test decoding of Git octal escape sequences for paths with accents and special characters."""
+    from app.models.commit import decode_git_path
+
+    # Path with í (\303\255) and ç (\303\247)
+    raw1 = r"Fluxos/1o Grau/Fam\303\255lia/Juntada de Pe\303\247as.xml"
+    assert decode_git_path(raw1) == "Fluxos/1o Grau/Família/Juntada de Peças.xml"
+
+    # Quoted path with ã (\303\243) and ê (\303\252)
+    raw2 = r'"Fluxos/1o Grau/Plant\303\243o/Transfer\303\252ncia de Plant\303\243o.xml"'
+    assert decode_git_path(raw2) == "Fluxos/1o Grau/Plantão/Transferência de Plantão.xml"
+
+    # Normal path
+    raw3 = "app/models/commit.py"
+    assert decode_git_path(raw3) == "app/models/commit.py"
+
+    # None and empty
+    assert decode_git_path("") == ""
+    assert decode_git_path(None) == ""

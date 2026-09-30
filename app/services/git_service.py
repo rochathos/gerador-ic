@@ -64,6 +64,19 @@ class GitService:
         }
 
     @staticmethod
+    def decode_git_path(path: str) -> str:
+        """Decode Git quoted paths containing octal escape sequences (e.g. \\303\\255 -> í)."""
+        if not path:
+            return ""
+        clean = str(path).strip("\"'")
+        if "\\" in clean:
+            try:
+                return clean.encode("latin1").decode("unicode_escape").encode("latin1").decode("utf-8")
+            except Exception:
+                return clean
+        return clean
+
+    @staticmethod
     def validate_repository(repo_path: str | Path) -> Tuple[bool, str]:
         """Validate if the given path is a valid Git repository."""
         path = Path(repo_path).resolve()
@@ -198,7 +211,7 @@ class GitService:
                 try:
                     stats = commit.stats
                     for file_path, file_stat in stats.files.items():
-                        clean_path = file_path.strip('"').strip("'")
+                        clean_path = cls.decode_git_path(file_path)
                         is_xml = clean_path.lower().endswith(".xml")
                         files_changed.append({
                             "path": clean_path,
@@ -216,7 +229,7 @@ class GitService:
                             for d in diff:
                                 target_path = d.a_path or d.b_path
                                 if target_path:
-                                    clean_path = str(target_path).strip('"').strip("'")
+                                    clean_path = cls.decode_git_path(target_path)
                                     files_changed.append({
                                         "path": clean_path,
                                         "filename": clean_path.replace("\\", "/").split("/")[-1],
@@ -230,7 +243,7 @@ class GitService:
 
                 # Check for XML changes and analyze tags using icf.sh rules
                 has_xml = any(
-                    f.get("is_xml") or str(f.get("path", "")).strip('"').strip("'").lower().endswith(".xml")
+                    f.get("is_xml") or cls.decode_git_path(str(f.get("path", ""))).lower().endswith(".xml")
                     for f in files_changed
                     if isinstance(f, dict)
                 )
