@@ -3,10 +3,64 @@
  */
 
 document.addEventListener("DOMContentLoaded", () => {
+  initCommitsStore();
   setupQuickFilters();
   setupClipboardCopy();
   setupSearchForm();
 });
+
+/**
+ * In-memory store for commit data on the current page
+ */
+window.COMMITS_STORE = {};
+
+function initCommitsStore() {
+  window.COMMITS_STORE = {};
+  const el = document.getElementById("commits-data");
+  if (!el) return;
+  try {
+    const list = JSON.parse(el.textContent);
+    if (Array.isArray(list)) {
+      list.forEach((c) => {
+        if (c && c.hash) {
+          window.COMMITS_STORE[c.hash] = c;
+        }
+      });
+    }
+  } catch (err) {
+    console.error("Erro ao inicializar COMMITS_STORE:", err);
+  }
+}
+
+/**
+ * Open Create Catalog Item (IC) Modal by commit hash
+ */
+function openCreateICByHash(commitHash) {
+  if (!window.COMMITS_STORE || Object.keys(window.COMMITS_STORE).length === 0) {
+    initCommitsStore();
+  }
+  const commit = window.COMMITS_STORE[commitHash];
+  if (commit) {
+    openCreateICModal(commit);
+  } else {
+    console.warn("Commit não encontrado no COMMITS_STORE:", commitHash);
+  }
+}
+
+/**
+ * Open Files Modal by commit hash
+ */
+function viewFilesByHash(commitHash) {
+  if (!window.COMMITS_STORE || Object.keys(window.COMMITS_STORE).length === 0) {
+    initCommitsStore();
+  }
+  const commit = window.COMMITS_STORE[commitHash];
+  if (commit && commit.files_changed) {
+    viewFiles(commitHash, commit.files_changed);
+  } else {
+    viewFiles(commitHash, []);
+  }
+}
 
 /**
  * Format Date to YYYY-MM-DDTHH:MM for datetime-local inputs
@@ -222,11 +276,15 @@ let currentModalCommit = null;
 function openCreateICModal(commitData) {
   let commit = commitData;
   if (typeof commit === "string") {
-    try {
-      commit = JSON.parse(commitData);
-    } catch (e) {
-      console.error("Erro ao converter dados do commit:", e);
-      return;
+    if (window.COMMITS_STORE && window.COMMITS_STORE[commit]) {
+      commit = window.COMMITS_STORE[commit];
+    } else {
+      try {
+        commit = JSON.parse(commitData);
+      } catch (e) {
+        console.error("Erro ao converter dados do commit:", e);
+        return;
+      }
     }
   }
 

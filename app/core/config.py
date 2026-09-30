@@ -32,6 +32,7 @@ class Settings(BaseSettings):
 
     # Git Config
     DEFAULT_GIT_REPO_PATH: str = "C:/ambiente/Git/PJE"
+    DEFAULT_REPO_PATH: str = "C:/ambiente/Git/PJE"
     GIT_AUTHOR_NAME: Optional[str] = "athos.rocha"
     GIT_AUTHOR_EMAIL: Optional[str] = "athosrocha123@gmail.com"
 

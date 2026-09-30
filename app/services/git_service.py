@@ -89,8 +89,8 @@ class GitService:
     def get_commits(
         cls,
         repo_path: str | Path,
-        start_date: datetime,
-        end_date: datetime,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
         author: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """Fetch commits in the specified period, optionally filtered by author."""
@@ -106,20 +106,13 @@ class GitService:
 
         repo = git.Repo(path)
 
-        # Ensure start and end datetimes have timezone info for accurate comparison
-        if start_date.tzinfo is None:
-            start_date_tz = start_date.replace(tzinfo=timezone.utc)
-        else:
-            start_date_tz = start_date
+        start_date_tz = None
+        if start_date is not None:
+            start_date_tz = start_date.replace(tzinfo=timezone.utc) if start_date.tzinfo is None else start_date
 
-        if end_date.tzinfo is None:
-            end_date_tz = end_date.replace(tzinfo=timezone.utc)
-        else:
-            end_date_tz = end_date
-
-        # Convert to timestamps for git log query efficiency
-        since_ts = int(start_date_tz.timestamp())
-        until_ts = int(end_date_tz.timestamp())
+        end_date_tz = None
+        if end_date is not None:
+            end_date_tz = end_date.replace(tzinfo=timezone.utc) if end_date.tzinfo is None else end_date
 
         commits_found: List[Dict[str, Any]] = []
 
@@ -128,15 +121,19 @@ class GitService:
             # Passing --all ensures commits on any branch are retrieved
             iter_kwargs: Dict[str, Any] = {
                 "all": True,
-                "since": since_ts,
-                "until": until_ts,
             }
+            if start_date_tz is not None:
+                iter_kwargs["since"] = int(start_date_tz.timestamp())
+            if end_date_tz is not None:
+                iter_kwargs["until"] = int(end_date_tz.timestamp())
 
             for commit in repo.iter_commits(**iter_kwargs):
                 commit_dt = commit.committed_datetime
 
                 # Safety check against time boundaries
-                if not (start_date_tz <= commit_dt <= end_date_tz):
+                if start_date_tz is not None and commit_dt < start_date_tz:
+                    continue
+                if end_date_tz is not None and commit_dt > end_date_tz:
                     continue
 
                 # Filter by author if provided

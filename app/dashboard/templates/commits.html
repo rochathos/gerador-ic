@@ -159,7 +159,7 @@
                     </span>
                     {% endif %}
                     {% if commit.files_changed %}
-                    <button type="button" class="btn btn-sm btn-secondary-custom py-1 px-2 small" onclick='viewFiles("{{ commit.hash }}", {{ commit.files_changed|tojson }})'>
+                    <button type="button" class="btn btn-sm btn-secondary-custom py-1 px-2 small" onclick="viewFilesByHash('{{ commit.hash }}')">
                       <i class="bi bi-file-code me-1 text-info"></i> {{ commit.files_count }} arq
                     </button>
                     {% else %}
@@ -169,7 +169,7 @@
                 </td>
                 <td class="text-center">
                   <button type="button" class="btn btn-sm btn-primary-custom py-1 px-2 small d-inline-flex align-items-center gap-1"
-                          onclick='openCreateICModal({{ commit.to_dict()|tojson }})'
+                          onclick="openCreateICByHash('{{ commit.hash }}')"
                           title="Gerar Item de Catálogo (IC) para este commit">
                     <i class="bi bi-card-checklist"></i>
                     <span>Criar IC</span>
@@ -191,4 +191,13 @@
     </div>
   </div>
 </div>
+
+<!-- Safe JSON data store for commits -->
+<script id="commits-data" type="application/json">
+  [
+    {% for commit in commits %}
+      {{ commit.to_dict()|tojson }}{% if not loop.last %},{% endif %}
+    {% endfor %}
+  ]
+</script>
 {% endblock %}
