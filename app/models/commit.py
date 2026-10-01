@@ -136,7 +136,7 @@ def find_flow_metrics_for_file(path: str, flows: Dict[str, Any]) -> Optional[Dic
 
 
 def format_flow_tags_lines(flow_data: Dict[str, Any]) -> List[str]:
-    """Format tags touched for a specific flow into compact bullet lines."""
+    """Format tags touched for a specific flow with a line break for each adjusted tag."""
     lines: List[str] = []
     f_added = flow_data.get("added", {})
     f_removed = flow_data.get("removed", {})
@@ -144,11 +144,13 @@ def format_flow_tags_lines(flow_data: Dict[str, Any]) -> List[str]:
     f_total_removed = flow_data.get("total_removed", sum(f_removed.values()))
 
     if f_added:
-        add_items = [f"<{t}>: {c}" for t, c in sorted(f_added.items(), key=lambda x: x[1], reverse=True)]
-        lines.append(f"  * Tags Adicionadas (+{f_total_added}): {', '.join(add_items)}")
+        lines.append(f"  * Tags Adicionadas (+{f_total_added}):")
+        for tag, count in sorted(f_added.items(), key=lambda x: x[1], reverse=True):
+            lines.append(f"    * <{tag}>: {count}")
     if f_removed:
-        rem_items = [f"<{t}>: {c}" for t, c in sorted(f_removed.items(), key=lambda x: x[1], reverse=True)]
-        lines.append(f"  * Tags Removidas (-{f_total_removed}): {', '.join(rem_items)}")
+        lines.append(f"  * Tags Removidas (-{f_total_removed}):")
+        for tag, count in sorted(f_removed.items(), key=lambda x: x[1], reverse=True):
+            lines.append(f"    * <{tag}>: {count}")
 
     return lines
 
@@ -263,11 +265,13 @@ def build_ic_description(
         added_tags = parsed_metrics.get("added", {})
         removed_tags = parsed_metrics.get("removed", {})
         if added_tags:
-            add_items = [f"<{t}>: {c}" for t, c in sorted(added_tags.items(), key=lambda x: x[1], reverse=True)]
-            lines.append(f"- Tags Adicionadas (+{added_cnt}): {', '.join(add_items)}")
+            lines.append(f"- Tags Adicionadas (+{added_cnt}):")
+            for t, c in sorted(added_tags.items(), key=lambda x: x[1], reverse=True):
+                lines.append(f"  * <{t}>: {c}")
         if removed_tags:
-            rem_items = [f"<{t}>: {c}" for t, c in sorted(removed_tags.items(), key=lambda x: x[1], reverse=True)]
-            lines.append(f"- Tags Removidas (-{removed_cnt}): {', '.join(rem_items)}")
+            lines.append(f"- Tags Removidas (-{removed_cnt}):")
+            for t, c in sorted(removed_tags.items(), key=lambda x: x[1], reverse=True):
+                lines.append(f"  * <{t}>: {c}")
 
     return "\n".join(lines)
 

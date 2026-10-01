@@ -504,12 +504,16 @@ function openCreateICModal(commitData) {
             const fTotalRemoved = flowData.total_removed || Object.values(fRemoved).reduce((a, b) => a + b, 0);
 
             if (Object.keys(fAdded).length > 0) {
-              const addParts = Object.entries(fAdded).sort((a, b) => b[1] - a[1]).map(([t, c]) => `<${t}>: ${c}`).join(", ");
-              lines.push(`  * Tags Adicionadas (+${fTotalAdded}): ${addParts}`);
+              lines.push(`  * Tags Adicionadas (+${fTotalAdded}):`);
+              Object.entries(fAdded).sort((a, b) => b[1] - a[1]).forEach(([t, c]) => {
+                lines.push(`    * <${t}>: ${c}`);
+              });
             }
             if (Object.keys(fRemoved).length > 0) {
-              const remParts = Object.entries(fRemoved).sort((a, b) => b[1] - a[1]).map(([t, c]) => `<${t}>: ${c}`).join(", ");
-              lines.push(`  * Tags Removidas (-${fTotalRemoved}): ${remParts}`);
+              lines.push(`  * Tags Removidas (-${fTotalRemoved}):`);
+              Object.entries(fRemoved).sort((a, b) => b[1] - a[1]).forEach(([t, c]) => {
+                lines.push(`    * <${t}>: ${c}`);
+              });
             }
           }
         } else {
@@ -530,12 +534,16 @@ function openCreateICModal(commitData) {
               const fTotalAdded = fData.total_added || Object.values(fAdded).reduce((a, b) => a + b, 0);
               const fTotalRemoved = fData.total_removed || Object.values(fRemoved).reduce((a, b) => a + b, 0);
               if (Object.keys(fAdded).length > 0) {
-                const addParts = Object.entries(fAdded).sort((a, b) => b[1] - a[1]).map(([t, c]) => `<${t}>: ${c}`).join(", ");
-                lines.push(`  * Tags Adicionadas (+${fTotalAdded}): ${addParts}`);
+                lines.push(`  * Tags Adicionadas (+${fTotalAdded}):`);
+                Object.entries(fAdded).sort((a, b) => b[1] - a[1]).forEach(([t, c]) => {
+                  lines.push(`    * <${t}>: ${c}`);
+                });
               }
               if (Object.keys(fRemoved).length > 0) {
-                const remParts = Object.entries(fRemoved).sort((a, b) => b[1] - a[1]).map(([t, c]) => `<${t}>: ${c}`).join(", ");
-                lines.push(`  * Tags Removidas (-${fTotalRemoved}): ${remParts}`);
+                lines.push(`  * Tags Removidas (-${fTotalRemoved}):`);
+                Object.entries(fRemoved).sort((a, b) => b[1] - a[1]).forEach(([t, c]) => {
+                  lines.push(`    * <${t}>: ${c}`);
+                });
               }
             }
           }
@@ -558,12 +566,16 @@ function openCreateICModal(commitData) {
           const fTotalAdded = fData.total_added || Object.values(fAdded).reduce((a, b) => a + b, 0);
           const fTotalRemoved = fData.total_removed || Object.values(fRemoved).reduce((a, b) => a + b, 0);
           if (Object.keys(fAdded).length > 0) {
-            const addParts = Object.entries(fAdded).sort((a, b) => b[1] - a[1]).map(([t, c]) => `<${t}>: ${c}`).join(", ");
-            lines.push(`  * Tags Adicionadas (+${fTotalAdded}): ${addParts}`);
+            lines.push(`  * Tags Adicionadas (+${fTotalAdded}):`);
+            Object.entries(fAdded).sort((a, b) => b[1] - a[1]).forEach(([t, c]) => {
+              lines.push(`    * <${t}>: ${c}`);
+            });
           }
           if (Object.keys(fRemoved).length > 0) {
-            const remParts = Object.entries(fRemoved).sort((a, b) => b[1] - a[1]).map(([t, c]) => `<${t}>: ${c}`).join(", ");
-            lines.push(`  * Tags Removidas (-${fTotalRemoved}): ${remParts}`);
+            lines.push(`  * Tags Removidas (-${fTotalRemoved}):`);
+            Object.entries(fRemoved).sort((a, b) => b[1] - a[1]).forEach(([t, c]) => {
+              lines.push(`    * <${t}>: ${c}`);
+            });
           }
         }
       });
@@ -574,12 +586,16 @@ function openCreateICModal(commitData) {
       lines.push("");
       lines.push("Tags XML Alteradas:");
       if (Object.keys(addedTags).length > 0) {
-        const addParts = Object.entries(addedTags).sort((a, b) => b[1] - a[1]).map(([t, c]) => `<${t}>: ${c}`).join(", ");
-        lines.push(`- Tags Adicionadas (+${totalAdded}): ${addParts}`);
+        lines.push(`- Tags Adicionadas (+${totalAdded}):`);
+        Object.entries(addedTags).sort((a, b) => b[1] - a[1]).forEach(([t, c]) => {
+          lines.push(`  * <${t}>: ${c}`);
+        });
       }
       if (Object.keys(removedTags).length > 0) {
-        const remParts = Object.entries(removedTags).sort((a, b) => b[1] - a[1]).map(([t, c]) => `<${t}>: ${c}`).join(", ");
-        lines.push(`- Tags Removidas (-${totalRemoved}): ${remParts}`);
+        lines.push(`- Tags Removidas (-${totalRemoved}):`);
+        Object.entries(removedTags).sort((a, b) => b[1] - a[1]).forEach(([t, c]) => {
+          lines.push(`  * <${t}>: ${c}`);
+        });
       }
     }
     icDesc = lines.join("\n");

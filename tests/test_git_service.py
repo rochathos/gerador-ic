@@ -325,12 +325,15 @@ def test_build_ic_description_compact_format():
     assert "Commit: 5de7896" in desc
     assert "Itens de Catálogo (IC) calculados: 6 IC(s) (5 adicionadas, 1 removidas)" in desc
     assert "Arquivos Alterados:" in desc
-    # Checks that tags are placed under the XML file
+    # Checks that tags are placed under the XML file with a line break per tag
     assert "- [XML] Fluxos/1o Grau/Criminal/Análise de Secretaria - Crimes Tráfico de Drogas.xml (+15 / -2)" in desc
-    assert "  * Tags Adicionadas (+4): <transition>: 4" in desc
+    assert "  * Tags Adicionadas (+4):" in desc
+    assert "    * <transition>: 4" in desc
     assert "- [XML] Fluxos/1o Grau/Criminal/Análise de Secretaria - VDOC.xml (+1 / -1)" in desc
-    assert "  * Tags Adicionadas (+1): <condition>: 1" in desc
-    assert "  * Tags Removidas (-1): <condition>: 1" in desc
+    assert "  * Tags Adicionadas (+1):" in desc
+    assert "    * <condition>: 1" in desc
+    assert "  * Tags Removidas (-1):" in desc
+    assert "    * <condition>: 1" in desc
     assert "- src/main/resources/application.properties (+2 / -0)" in desc
     assert "(Total de arquivos XML alterados: 2)" in desc
     # Ensure redundant section was removed
