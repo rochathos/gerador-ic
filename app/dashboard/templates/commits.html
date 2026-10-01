@@ -11,7 +11,7 @@
         <i class="bi bi-git text-primary"></i> Gerenciamento de Commits
       </h2>
       <p class="text-muted mb-0">
-        Commits capturados do Git e armazenados no PostgreSQL.
+        Consulta direta dos seus commits do Git em tempo real com carregamento contínuo (lazy-load). O commit só é salvo no banco se você desejar.
       </p>
     </div>
     
@@ -34,11 +34,10 @@
   <!-- Filter Card with XML quick toggle -->
   <div class="col-12">
     <div class="card-glass p-3">
-      <form method="GET" action="/commits" class="row g-3 align-items-end">
+      <form method="GET" action="/commits" class="row g-3 align-items-end" id="commitsFilterForm">
         <div class="col-12 col-md-3">
           <label class="form-label text-muted small fw-semibold">Repositório</label>
           <select name="repo_name" class="form-select form-select-custom">
-            <option value="">Todos os Repositórios</option>
             {% for r in available_repos %}
             <option value="{{ r }}" {% if selected_repo == r %}selected{% endif %}>{{ r }}</option>
             {% endfor %}
@@ -47,19 +46,19 @@
 
         <div class="col-12 col-sm-6 col-md-2">
           <label class="form-label text-muted small fw-semibold">Data Inicial</label>
-          <input type="date" name="start_date" class="form-control form-control-custom" value="{{ filter_start_date }}">
+          <input type="date" name="start_date" id="filter_start_date" class="form-control form-control-custom" value="{{ filter_start_date }}">
         </div>
 
         <div class="col-12 col-sm-6 col-md-2">
           <label class="form-label text-muted small fw-semibold">Data Final</label>
-          <input type="date" name="end_date" class="form-control form-control-custom" value="{{ filter_end_date }}">
+          <input type="date" name="end_date" id="filter_end_date" class="form-control form-control-custom" value="{{ filter_end_date }}">
         </div>
 
         <div class="col-12 col-md-3">
-          <label class="form-label text-muted small fw-semibold">Buscar na Mensagem / Autor</label>
+          <label class="form-label text-muted small fw-semibold">Buscar por Hash / Mensagem / Autor</label>
           <div class="input-group">
             <span class="input-group-text bg-dark border-secondary text-muted"><i class="bi bi-search"></i></span>
-            <input type="text" name="q" class="form-control form-control-custom" value="{{ filter_query }}" placeholder="Ex: contrato, fix, bug...">
+            <input type="text" name="q" id="filter_query" class="form-control form-control-custom" value="{{ filter_query }}" placeholder="Hash (ex: 29487de8), mensagem...">
           </div>
         </div>
 
@@ -81,7 +80,7 @@
           </div>
           {% if xml_commits_count > 0 %}
           <div class="d-flex align-items-center gap-2 small">
-            <span class="text-muted">Total de XMLs no período:</span>
+            <span class="text-muted">Total de XMLs no lote:</span>
             <span class="badge bg-warning text-dark fw-bold">{{ total_xml_files }} arquivos</span>
             <span class="badge bg-success-subtle text-success border border-success-subtle">+{{ total_xml_ins }}</span>
             <span class="badge bg-danger-subtle text-danger border border-danger-subtle">-{{ total_xml_del }}</span>
@@ -98,7 +97,7 @@
     <div class="card-glass">
       <div class="p-3 border-bottom border-secondary border-opacity-25 d-flex justify-content-between align-items-center">
         <span class="text-muted small">
-          Exibindo <b class="text-light">{{ commits|length }}</b> commits encontrados no PostgreSQL
+          Exibindo <b id="commitsLoadedCount" class="text-light">{{ commits|length }}</b> commits consultados no repositório Git
           {% if only_xml %}<span class="badge bg-warning text-dark ms-2">Filtro XML Ativo</span>{% endif %}
         </span>
       </div>
@@ -108,18 +107,19 @@
           <thead>
             <tr>
               <th style="width: 130px;">Hash</th>
-              <th style="width: 160px;">Data / Hora</th>
-              <th style="width: 200px;">Autor</th>
-              <th style="width: 150px;">Repositório</th>
+              <th style="width: 150px;">Data / Hora</th>
+              <th style="width: 180px;">Autor</th>
+              <th style="width: 120px;">Repositório</th>
               <th>Mensagem do Commit</th>
-              <th style="width: 180px;" class="text-center">Arquivos / XMLs</th>
+              <th style="width: 160px;" class="text-center">Arquivos / XMLs</th>
+              <th style="width: 110px;" class="text-center">Status IC</th>
               <th style="width: 120px;" class="text-center">Criar IC</th>
             </tr>
           </thead>
-          <tbody>
+          <tbody id="commitsTableBody">
             {% if commits %}
               {% for commit in commits %}
-              <tr>
+              <tr id="row-commit-{{ commit.hash }}">
                 <td>
                   <div class="d-flex align-items-center gap-1">
                     {% if commit.web_commit_url %}
@@ -171,6 +171,17 @@
                     {% endif %}
                   </div>
                 </td>
+                <td class="text-center" id="status-cell-{{ commit.hash }}">
+                  {% if commit.is_saved %}
+                  <span class="badge bg-success-subtle text-success border border-success-subtle" title="Item de Catálogo já salvo no PostgreSQL">
+                    <i class="bi bi-check-circle-fill me-1"></i>Salvo
+                  </span>
+                  {% else %}
+                  <span class="badge bg-secondary-subtle text-muted border border-secondary-subtle" title="Não salvo no banco de dados">
+                    Não Salvo
+                  </span>
+                  {% endif %}
+                </td>
                 <td class="text-center">
                   <button type="button" class="btn btn-sm btn-primary-custom py-1 px-2 small d-inline-flex align-items-center gap-1"
                           onclick="openCreateICByHash('{{ commit.hash }}')"
@@ -182,8 +193,8 @@
               </tr>
               {% endfor %}
             {% else %}
-              <tr>
-                <td colspan="7" class="text-center py-5 text-muted">
+              <tr id="emptyCommitsRow">
+                <td colspan="8" class="text-center py-5 text-muted">
                   <i class="bi bi-inbox fs-2 d-block mb-2 text-dim"></i>
                   Nenhum commit encontrado para os filtros selecionados.
                 </td>
@@ -192,11 +203,34 @@
           </tbody>
         </table>
       </div>
+
+      <!-- Lazy load section -->
+      <div id="loadMoreSection" class="p-3 text-center border-top border-secondary border-opacity-25 {% if not has_more %}d-none{% endif %}">
+        <button id="btnLoadMoreCommits" type="button" class="btn btn-outline-primary btn-sm px-4 py-2" onclick="loadMoreCommits()">
+          <i class="bi bi-arrow-down-circle me-1"></i> Carregar Mais Commits
+        </button>
+        <div id="loadMoreSpinner" class="spinner-border spinner-border-sm text-primary d-none ms-2" role="status">
+          <span class="visually-hidden">Carregando...</span>
+        </div>
+      </div>
+      <div id="noMoreCommitsNotice" class="p-3 text-center text-muted small border-top border-secondary border-opacity-25 {% if has_more or not commits %}d-none{% endif %}">
+        <i class="bi bi-check2-all me-1 text-success"></i> Todos os commits encontrados foram carregados.
+      </div>
     </div>
   </div>
 </div>
 
-<!-- Safe JSON data store for commits -->
+<!-- Configuration for Paging / Lazy Loading -->
+<div id="commitsPagingConfig"
+     data-next-skip="{{ next_skip }}"
+     data-has-more="{{ 'true' if has_more else 'false' }}"
+     data-query="{{ filter_query }}"
+     data-start-date="{{ filter_start_date }}"
+     data-end-date="{{ filter_end_date }}"
+     data-only-xml="{{ 'true' if only_xml else 'false' }}">
+</div>
+
+<!-- Safe JSON data store for initial commits -->
 <script id="commits-data" type="application/json">
   [
     {% for commit in commits %}

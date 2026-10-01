@@ -35,26 +35,72 @@ function initCommitsStore() {
 /**
  * Open Create Catalog Item (IC) Modal by commit hash
  */
-function openCreateICByHash(commitHash) {
+async function openCreateICByHash(commitHash) {
+  if (!commitHash) return;
   if (!window.COMMITS_STORE || Object.keys(window.COMMITS_STORE).length === 0) {
     initCommitsStore();
   }
-  const commit = window.COMMITS_STORE[commitHash];
+  let commit = window.COMMITS_STORE[commitHash];
+  if (!commit) {
+    const match = Object.values(window.COMMITS_STORE).find(
+      (c) => (c.hash && c.hash.startsWith(commitHash)) || (c.short_hash && c.short_hash.startsWith(commitHash))
+    );
+    if (match) {
+      commit = match;
+    }
+  }
+
+  if (!commit) {
+    try {
+      const res = await fetch(`/api/commits/inspect/${encodeURIComponent(commitHash)}`);
+      const data = await res.json();
+      if (data.success && data.commit) {
+        commit = data.commit;
+        window.COMMITS_STORE[commit.hash] = commit;
+      }
+    } catch (err) {
+      console.error("Erro ao inspecionar commit:", err);
+    }
+  }
+
   if (commit) {
     openCreateICModal(commit);
   } else {
-    console.warn("Commit não encontrado no COMMITS_STORE:", commitHash);
+    alert(`Commit '${commitHash}' não encontrado no repositório.`);
   }
 }
 
 /**
  * Open Files Modal by commit hash
  */
-function viewFilesByHash(commitHash) {
+async function viewFilesByHash(commitHash) {
+  if (!commitHash) return;
   if (!window.COMMITS_STORE || Object.keys(window.COMMITS_STORE).length === 0) {
     initCommitsStore();
   }
-  const commit = window.COMMITS_STORE[commitHash];
+  let commit = window.COMMITS_STORE[commitHash];
+  if (!commit) {
+    const match = Object.values(window.COMMITS_STORE).find(
+      (c) => (c.hash && c.hash.startsWith(commitHash)) || (c.short_hash && c.short_hash.startsWith(commitHash))
+    );
+    if (match) {
+      commit = match;
+    }
+  }
+
+  if (!commit) {
+    try {
+      const res = await fetch(`/api/commits/inspect/${encodeURIComponent(commitHash)}`);
+      const data = await res.json();
+      if (data.success && data.commit) {
+        commit = data.commit;
+        window.COMMITS_STORE[commit.hash] = commit;
+      }
+    } catch (err) {
+      console.error("Erro ao inspecionar commit para arquivos:", err);
+    }
+  }
+
   if (commit && commit.files_changed) {
     viewFiles(commitHash, commit.files_changed);
   } else {
@@ -697,6 +743,7 @@ async function saveICToDatabase(btn) {
         title: title,
         description: description,
         status: "sugerido",
+        commit_hash: currentModalCommit ? (currentModalCommit.hash || currentModalCommit.short_hash) : "",
       }),
     });
 
@@ -710,6 +757,17 @@ async function saveICToDatabase(btn) {
         alertEl.classList.remove("d-none", "alert-danger");
         alertEl.classList.add("alert-success");
         alertText.textContent = `Item de Catálogo #${data.id} salvo com sucesso no banco de dados!`;
+      }
+      if (currentModalCommit && currentModalCommit.hash) {
+        currentModalCommit.is_saved = true;
+        const cell = document.getElementById(`status-cell-${currentModalCommit.hash}`);
+        if (cell) {
+          cell.innerHTML = `
+            <span class="badge bg-success-subtle text-success border border-success-subtle" title="Item de Catálogo já salvo no PostgreSQL">
+              <i class="bi bi-check-circle-fill me-1"></i>Salvo
+            </span>
+          `;
+        }
       }
     } else {
       if (btn) {
@@ -733,5 +791,181 @@ async function saveICToDatabase(btn) {
       alertEl.classList.add("alert-danger");
       alertText.textContent = `Erro de comunicação com o servidor: ${err.message}`;
     }
+  }
+}
+
+/**
+ * Escape string for safe insertion into HTML
+ */
+function escapeHtml(str) {
+  if (!str) return "";
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+/**
+ * Lazy loading for commits table
+ */
+async function loadMoreCommits() {
+  const configEl = document.getElementById("commitsPagingConfig");
+  const btn = document.getElementById("btnLoadMoreCommits");
+  const spinner = document.getElementById("loadMoreSpinner");
+  const tbody = document.getElementById("commitsTableBody");
+  const notice = document.getElementById("noMoreCommitsNotice");
+  const countEl = document.getElementById("commitsLoadedCount");
+
+  if (!configEl || !btn || !tbody) return;
+
+  const nextSkip = parseInt(configEl.dataset.nextSkip || "0", 10);
+  const query = configEl.dataset.query || "";
+  const startDate = configEl.dataset.startDate || "";
+  const endDate = configEl.dataset.endDate || "";
+  const onlyXml = configEl.dataset.onlyXml === "true";
+
+  btn.disabled = true;
+  if (spinner) spinner.classList.remove("d-none");
+
+  try {
+    const params = new URLSearchParams({
+      skip: String(nextSkip),
+      limit: "20",
+    });
+    if (query) params.append("q", query);
+    if (startDate) params.append("start_date", startDate);
+    if (endDate) params.append("end_date", endDate);
+    if (onlyXml) params.append("only_xml", "true");
+
+    const res = await fetch(`/api/commits/git-paged?${params.toString()}`);
+    const data = await res.json();
+
+    if (data.success && Array.isArray(data.commits)) {
+      data.commits.forEach((c) => {
+        // Cache in window.COMMITS_STORE
+        window.COMMITS_STORE[c.hash] = c;
+
+        // Create table row
+        const tr = document.createElement("tr");
+        tr.id = `row-commit-${c.hash}`;
+
+        const shortHash = c.short_hash || (c.hash ? c.hash.substring(0, 7) : "");
+        const webUrl = c.commit_url || "";
+
+        let hashHtml = "";
+        if (webUrl) {
+          hashHtml = `
+            <a href="${webUrl}" target="_blank" class="badge-hash text-decoration-none d-inline-flex align-items-center gap-1" title="Abrir commit no GitLab/GitHub">
+              ${shortHash} <i class="bi bi-box-arrow-up-right" style="font-size: 0.65rem;"></i>
+            </a>
+            <button type="button" class="btn btn-link btn-sm p-0 text-info copy-btn" data-copy="${webUrl}" title="Copiar link direto do commit">
+              <i class="bi bi-link-45deg fs-6"></i>
+            </button>
+          `;
+        } else {
+          hashHtml = `<span class="badge-hash">${shortHash}</span>`;
+        }
+        hashHtml += `
+          <button type="button" class="btn btn-link btn-sm p-0 text-muted copy-btn" data-copy="${c.hash}" title="Copiar hash completo">
+            <i class="bi bi-clipboard" style="font-size: 0.75rem;"></i>
+          </button>
+        `;
+
+        let metricsHtml = "";
+        if (c.ic_count && c.ic_count > 0) {
+          metricsHtml += `
+            <span class="badge bg-warning text-dark fw-bold" title="${c.ic_count} IC(s) calculados (+${c.ic_added_count || 0} add / -${c.ic_removed_count || 0} rem)">
+              <i class="bi bi-tag-fill me-1"></i>${c.ic_count} ICs
+            </span>
+          `;
+        } else if (c.has_xml_changes) {
+          metricsHtml += `
+            <span class="badge bg-warning text-dark" title="${c.xml_files_count || 0} arquivo(s) XML">
+              <i class="bi bi-filetype-xml"></i> ${c.xml_files_count || 0} XML
+            </span>
+          `;
+        }
+
+        if (c.files_count > 0) {
+          metricsHtml += `
+            <button type="button" class="btn btn-sm btn-secondary-custom py-1 px-2 small" onclick="viewFilesByHash('${c.hash}')">
+              <i class="bi bi-file-code me-1 text-info"></i> ${c.files_count} arq
+            </button>
+          `;
+        } else {
+          metricsHtml += `<span class="text-muted small">-</span>`;
+        }
+
+        let statusHtml = "";
+        if (c.is_saved) {
+          statusHtml = `
+            <span class="badge bg-success-subtle text-success border border-success-subtle" title="Item de Catálogo já salvo no PostgreSQL">
+              <i class="bi bi-check-circle-fill me-1"></i>Salvo
+            </span>
+          `;
+        } else {
+          statusHtml = `
+            <span class="badge bg-secondary-subtle text-muted border border-secondary-subtle" title="Não salvo no banco de dados">
+              Não Salvo
+            </span>
+          `;
+        }
+
+        tr.innerHTML = `
+          <td><div class="d-flex align-items-center gap-1">${hashHtml}</div></td>
+          <td class="text-muted small">${c.commit_date || ""}</td>
+          <td><div class="fw-medium text-light small">${escapeHtml(c.author || "")}</div></td>
+          <td>
+            <span class="badge bg-dark border border-secondary text-info small">
+              <i class="bi bi-folder2 me-1"></i>${escapeHtml(c.repo_name || "Local")}
+            </span>
+          </td>
+          <td><div class="text-light">${escapeHtml(c.message || "")}</div></td>
+          <td class="text-center">
+            <div class="d-flex align-items-center justify-content-center gap-1 flex-wrap">
+              ${metricsHtml}
+            </div>
+          </td>
+          <td class="text-center" id="status-cell-${c.hash}">${statusHtml}</td>
+          <td class="text-center">
+            <button type="button" class="btn btn-sm btn-primary-custom py-1 px-2 small d-inline-flex align-items-center gap-1"
+                    onclick="openCreateICByHash('${c.hash}')"
+                    title="Gerar Item de Catálogo (IC) para este commit">
+              <i class="bi bi-card-checklist"></i>
+              <span>Criar IC</span>
+            </button>
+          </td>
+        `;
+
+        tbody.appendChild(tr);
+      });
+
+      // Update total loaded count
+      const totalLoaded = tbody.querySelectorAll("tr:not(#emptyCommitsRow)").length;
+      if (countEl) countEl.textContent = totalLoaded;
+
+      // Update paging configuration
+      configEl.dataset.nextSkip = String(data.next_skip);
+      configEl.dataset.hasMore = data.has_more ? "true" : "false";
+
+      // Re-bind clipboard copy buttons for new rows
+      if (typeof setupClipboardCopy === "function") {
+        setupClipboardCopy();
+      }
+
+      // If no more commits, hide button and show notice
+      const loadMoreSec = document.getElementById("loadMoreSection");
+      if (!data.has_more) {
+        if (loadMoreSec) loadMoreSec.classList.add("d-none");
+        if (notice) notice.classList.remove("d-none");
+      }
+    }
+  } catch (err) {
+    console.error("Erro ao carregar mais commits:", err);
+  } finally {
+    btn.disabled = false;
+    if (spinner) spinner.classList.add("d-none");
   }
 }

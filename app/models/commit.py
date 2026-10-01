@@ -437,6 +437,7 @@ class Commit(Base):
             "ic_removed_count": self.ic_removed_count,
             "ic_title": self.ic_title,
             "ic_description": self.ic_description,
+            "is_saved": getattr(self, "is_saved", False),
         }
 
 
@@ -457,6 +458,7 @@ class CommitItem:
         self.commit_url = data.get("commit_url", "")
         self.xml_tags_metrics = data.get("xml_tags_metrics") or {}
         self.ic_count = data.get("ic_count") or 0
+        self.is_saved = data.get("is_saved", False)
 
     @property
     def short_hash(self) -> str:
@@ -581,5 +583,6 @@ class CommitItem:
             "ic_removed_count": self.ic_removed_count,
             "ic_title": self.ic_title,
             "ic_description": self.ic_description,
+            "is_saved": getattr(self, "is_saved", False),
         }
 

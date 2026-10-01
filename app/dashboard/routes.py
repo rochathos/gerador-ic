@@ -10,7 +10,7 @@ from sqlalchemy import select, func, desc, or_
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.logger import logger
-from app.models.commit import Commit
+from app.models.commit import Commit, CommitItem
 from app.models.meeting import Meeting
 from app.models.catalog_item import CatalogItem
 from app.models.execution_history import ExecutionHistory
@@ -102,23 +102,24 @@ def home_view(
             start_date_val = start_dt.strftime("%Y-%m-%dT%H:%M")
             end_date_val = end_dt.strftime("%Y-%m-%dT%H:%M")
 
-        # By default, check if we have commits in DB, otherwise query Git for recent commits
-        stmt_commits = select(Commit).order_by(desc(Commit.commit_date)).limit(15)
-        commits = list(db.execute(stmt_commits).scalars().all())
-
-        if not commits and Path(active_repo).exists():
+        # Query Git directly for author's recent commits in real-time
+        if Path(active_repo).exists():
             try:
-                raw_commits = GitService.get_commits(
+                raw_commits, _ = GitService.get_commits_paged(
                     repo_path=active_repo,
-                    start_date=start_dt,
-                    end_date=end_dt,
                     author=active_author if active_author else None,
+                    skip=0,
+                    limit=15,
                 )
-                from app.models.commit import CommitItem
                 commits = [CommitItem(c) for c in raw_commits]
                 is_live_query = True
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning(f"Erro ao buscar commits recentes do Git para home: {exc}")
+                stmt_commits = select(Commit).order_by(desc(Commit.commit_date)).limit(15)
+                commits = list(db.execute(stmt_commits).scalars().all())
+        else:
+            stmt_commits = select(Commit).order_by(desc(Commit.commit_date)).limit(15)
+            commits = list(db.execute(stmt_commits).scalars().all())
 
     # Fetch metric totals
     total_commits = len(commits) if is_live_query else (db.execute(select(func.count(Commit.id))).scalar() or 0)
@@ -226,11 +227,13 @@ async def create_single_ic(
             title = payload.get("title", "")
             description = payload.get("description", "")
             status = payload.get("status", "sugerido")
+            commit_hash = payload.get("commit_hash", "")
         else:
             form_data = await request.form()
             title = form_data.get("title", "")
             description = form_data.get("description", "")
             status = form_data.get("status", "sugerido")
+            commit_hash = form_data.get("commit_hash", "")
 
         if not title:
             return JSONResponse(
@@ -242,6 +245,7 @@ async def create_single_ic(
             title=str(title).strip(),
             description=str(description).strip() if description else "",
             status=str(status) if status else "sugerido",
+            commit_hash=str(commit_hash).strip() if commit_hash else None,
         )
         db.add(item)
         db.commit()
@@ -273,79 +277,59 @@ def commits_view(
     only_xml: Optional[bool] = Query(False),
     db: Session = Depends(get_db),
 ):
-    """Render full commits table with filtering capabilities and XML diff analysis."""
-    stmt = select(Commit)
+    """Render commits table querying Git directly in real-time with lazy-loading support."""
+    active_repo = settings.DEFAULT_REPO_PATH
+    author_filter = settings.GIT_AUTHOR_NAME or None
 
-    if repo_name:
-        stmt = stmt.where(Commit.repo_name == repo_name)
-
+    s_dt = None
+    e_dt = None
     if start_date:
         try:
             s_dt = datetime.fromisoformat(start_date)
-            stmt = stmt.where(Commit.commit_date >= s_dt)
         except Exception:
             pass
-
     if end_date:
         try:
-            # End of specified day
             e_dt = datetime.fromisoformat(end_date).replace(hour=23, minute=59, second=59)
-            stmt = stmt.where(Commit.commit_date <= e_dt)
         except Exception:
             pass
 
-    if q:
-        query_pattern = f"%{q}%"
-        stmt = stmt.where(
-            or_(
-                Commit.message.ilike(query_pattern),
-                Commit.author.ilike(query_pattern),
-                Commit.hash.ilike(query_pattern),
+    commits = []
+    has_more = False
+
+    if Path(active_repo).exists():
+        try:
+            from app.models.commit import CommitItem
+            raw_commits, has_more = GitService.get_commits_paged(
+                repo_path=active_repo,
+                author=author_filter,
+                q=q,
+                start_date=s_dt,
+                end_date=e_dt,
+                only_xml=bool(only_xml),
+                skip=0,
+                limit=20,
             )
-        )
+            saved_stmt = select(CatalogItem.commit_hash).where(CatalogItem.commit_hash.is_not(None))
+            saved_commit_hashes = set(db.execute(saved_stmt).scalars().all())
 
-    stmt = stmt.order_by(desc(Commit.commit_date))
-    commits = list(db.execute(stmt).scalars().all())
+            for c in raw_commits:
+                ci = CommitItem(c)
+                ci.is_saved = ci.hash in saved_commit_hashes
+                commits.append(ci)
+        except Exception as exc:
+            logger.error(f"Erro ao buscar commits paginados do Git: {exc}")
+    else:
+        saved_commit_hashes = set()
 
-    # Calculate global XML stats before filtering if only_xml is toggled
+    # XML summary metrics for loaded commits
     xml_commits_count = sum(1 for c in commits if c.has_xml_changes)
     total_xml_files = sum(c.xml_files_count for c in commits)
     total_xml_ins = sum(c.xml_insertions for c in commits)
     total_xml_del = sum(c.xml_deletions for c in commits)
     total_xml_edits = sum(c.xml_total_edits for c in commits)
 
-    if only_xml:
-        commits = [c for c in commits if c.has_xml_changes]
-
-    # If no commits found in DB, attempt to fetch recent commits live from default repo
-    if not commits and Path(settings.DEFAULT_REPO_PATH).exists():
-        try:
-            s_dt = datetime.fromisoformat(start_date) if start_date else None
-            e_dt = datetime.fromisoformat(end_date).replace(hour=23, minute=59, second=59) if end_date else None
-            from app.models.commit import CommitItem
-            raw_commits = GitService.get_commits(
-                repo_path=settings.DEFAULT_REPO_PATH,
-                start_date=s_dt,
-                end_date=e_dt,
-                author=settings.GIT_AUTHOR_NAME or None,
-            )
-            commits = [CommitItem(c) for c in raw_commits]
-            if q:
-                ql = q.lower()
-                commits = [c for c in commits if ql in c.message.lower() or ql in c.author.lower() or ql in c.hash.lower()]
-            if only_xml:
-                commits = [c for c in commits if c.has_xml_changes]
-            xml_commits_count = sum(1 for c in commits if c.has_xml_changes)
-            total_xml_files = sum(c.xml_files_count for c in commits)
-            total_xml_ins = sum(c.xml_insertions for c in commits)
-            total_xml_del = sum(c.xml_deletions for c in commits)
-            total_xml_edits = sum(c.xml_total_edits for c in commits)
-        except Exception as exc:
-            logger.warning(f"Fallback para commits em tempo real falhou: {exc}")
-
-    # Get list of distinct repository names
-    repo_stmt = select(Commit.repo_name).distinct().where(Commit.repo_name.is_not(None))
-    available_repos = [r for r in db.execute(repo_stmt).scalars().all() if r]
+    available_repos = [settings.DEFAULT_REPO_NAME or "PJE"]
 
     return templates.TemplateResponse(
         request=request,
@@ -353,8 +337,10 @@ def commits_view(
         context={
             "active_page": "commits",
             "commits": commits,
+            "has_more": has_more,
+            "next_skip": len(commits),
             "available_repos": available_repos,
-            "selected_repo": repo_name or "",
+            "selected_repo": repo_name or (settings.DEFAULT_REPO_NAME or "PJE"),
             "filter_start_date": start_date or "",
             "filter_end_date": end_date or "",
             "filter_query": q or "",
@@ -367,6 +353,99 @@ def commits_view(
             "author_name": settings.GIT_AUTHOR_NAME,
         },
     )
+
+
+@router.get("/api/commits/git-paged")
+def api_commits_git_paged(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
+    q: Optional[str] = Query(None),
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
+    only_xml: bool = Query(False),
+    db: Session = Depends(get_db),
+):
+    """API endpoint to lazy-load commits directly from Git."""
+    active_repo = settings.DEFAULT_REPO_PATH
+    author_filter = settings.GIT_AUTHOR_NAME or None
+
+    s_dt = None
+    e_dt = None
+    if start_date:
+        try:
+            s_dt = datetime.fromisoformat(start_date)
+        except Exception:
+            pass
+    if end_date:
+        try:
+            e_dt = datetime.fromisoformat(end_date).replace(hour=23, minute=59, second=59)
+        except Exception:
+            pass
+
+    try:
+        from app.models.commit import CommitItem
+        raw_commits, has_more = GitService.get_commits_paged(
+            repo_path=active_repo,
+            author=author_filter,
+            q=q,
+            start_date=s_dt,
+            end_date=e_dt,
+            only_xml=only_xml,
+            skip=skip,
+            limit=limit,
+        )
+
+        saved_stmt = select(CatalogItem.commit_hash).where(CatalogItem.commit_hash.is_not(None))
+        saved_commit_hashes = set(db.execute(saved_stmt).scalars().all())
+
+        commit_items = []
+        for c in raw_commits:
+            ci = CommitItem(c)
+            c_dict = ci.to_dict()
+            c_dict["is_saved"] = c["hash"] in saved_commit_hashes
+            commit_items.append(c_dict)
+
+        return JSONResponse({
+            "success": True,
+            "commits": commit_items,
+            "has_more": has_more,
+            "next_skip": skip + len(commit_items),
+            "count": len(commit_items),
+        })
+    except Exception as exc:
+        logger.error(f"Erro no endpoint /api/commits/git-paged: {exc}")
+        return JSONResponse(status_code=500, content={"success": False, "message": str(exc), "commits": [], "has_more": False})
+
+
+@router.get("/api/commits/inspect/{commit_hash}")
+def api_commits_inspect(
+    commit_hash: str,
+    db: Session = Depends(get_db),
+):
+    """API endpoint to inspect any commit by hash in real-time without saving to DB."""
+    active_repo = settings.DEFAULT_REPO_PATH
+    clean_hash = commit_hash.strip()
+
+    try:
+        from app.models.commit import CommitItem
+        commit_data = GitService.get_commit_by_hash(active_repo, clean_hash)
+        if not commit_data:
+            return JSONResponse(
+                status_code=404,
+                content={"success": False, "message": f"Commit '{clean_hash}' não encontrado no repositório local."},
+            )
+
+        saved_stmt = select(CatalogItem.id).where(CatalogItem.commit_hash.ilike(f"{clean_hash}%"))
+        is_saved = db.execute(saved_stmt).scalar() is not None
+
+        ci = CommitItem(commit_data)
+        c_dict = ci.to_dict()
+        c_dict["is_saved"] = is_saved
+
+        return JSONResponse({"success": True, "commit": c_dict})
+    except Exception as exc:
+        logger.error(f"Erro ao inspecionar commit {clean_hash}: {exc}")
+        return JSONResponse(status_code=500, content={"success": False, "message": str(exc)})
 
 
 @router.get("/meetings", response_class=HTMLResponse)

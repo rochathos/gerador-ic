@@ -322,6 +322,183 @@ class GitService:
             raise
 
     @classmethod
+    def get_commit_by_hash(cls, repo_path: str | Path, commit_hash: str) -> Optional[Dict[str, Any]]:
+        """Look up a single commit directly from Git repository by full or abbreviated hash."""
+        path = Path(repo_path).resolve()
+        is_valid, _ = cls.validate_repository(path)
+        if not is_valid:
+            return None
+        try:
+            repo = git.Repo(path)
+            c = repo.commit(commit_hash.strip())
+            files_changed: List[Dict[str, Any]] = []
+            try:
+                for file_path, file_stat in c.stats.files.items():
+                    clean_path = cls.decode_git_path(file_path)
+                    files_changed.append({
+                        "path": clean_path,
+                        "filename": clean_path.replace("\\", "/").split("/")[-1],
+                        "is_xml": clean_path.lower().endswith(".xml"),
+                        "insertions": file_stat.get("insertions", 0),
+                        "deletions": file_stat.get("deletions", 0),
+                        "lines": file_stat.get("lines", 0),
+                    })
+            except Exception:
+                files_changed = []
+
+            has_xml = any(f.get("is_xml") for f in files_changed)
+            xml_analysis = cls.analyze_commit_xml_tags(repo, c.hexsha) if has_xml else {
+                "added": {},
+                "removed": {},
+                "total_added": 0,
+                "total_removed": 0,
+                "total_ics": 0,
+                "flows": {},
+            }
+            author_display = f"{c.author.name} <{c.author.email}>" if c.author.email else c.author.name
+            return {
+                "hash": c.hexsha,
+                "author": author_display,
+                "author_name": c.author.name or "",
+                "author_email": c.author.email or "",
+                "commit_date": c.committed_datetime,
+                "message": c.message.strip(),
+                "files_changed": files_changed,
+                "repo_name": cls.get_repo_name(path),
+                "repo_path": str(path),
+                "commit_url": cls.get_commit_url(path, c.hexsha),
+                "xml_tags_metrics": xml_analysis,
+                "ic_count": xml_analysis["total_ics"],
+            }
+        except Exception as exc:
+            logger.debug(f"Commit {commit_hash} não encontrado diretamente no Git: {exc}")
+            return None
+
+    @classmethod
+    def get_commits_paged(
+        cls,
+        repo_path: str | Path,
+        author: Optional[str] = None,
+        q: Optional[str] = None,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
+        only_xml: bool = False,
+        skip: int = 0,
+        limit: int = 20,
+    ) -> Tuple[List[Dict[str, Any]], bool]:
+        """Fetch a page of commits directly from Git with lazy-loading support without saving to database."""
+        path = Path(repo_path).resolve()
+        is_valid, msg = cls.validate_repository(path)
+        if not is_valid:
+            logger.error(f"Validação de repositório falhou: {msg}")
+            raise ValueError(msg)
+
+        repo = git.Repo(path)
+
+        # 1. Direct hash lookup if q is provided and matches a commit
+        if q and len(q.strip()) >= 4:
+            clean_q = q.strip()
+            single_commit = cls.get_commit_by_hash(path, clean_q)
+            if single_commit:
+                if only_xml and not any(f.get("is_xml") for f in single_commit.get("files_changed", [])):
+                    return [], False
+                return [single_commit], False
+
+        # 2. Iterate commits directly from Git
+        iter_kwargs: Dict[str, Any] = {"all": True}
+        start_date_tz = None
+        if start_date is not None:
+            start_date_tz = start_date.replace(tzinfo=timezone.utc) if start_date.tzinfo is None else start_date
+            iter_kwargs["since"] = int(start_date_tz.timestamp())
+
+        end_date_tz = None
+        if end_date is not None:
+            end_date_tz = end_date.replace(tzinfo=timezone.utc) if end_date.tzinfo is None else end_date
+            iter_kwargs["until"] = int(end_date_tz.timestamp())
+
+        if author:
+            iter_kwargs["author"] = author.strip()
+
+        matched_commits: List[Dict[str, Any]] = []
+        has_more = False
+        skipped = 0
+        query_text = q.strip().lower() if q else ""
+
+        for commit in repo.iter_commits(**iter_kwargs):
+            commit_dt = commit.committed_datetime
+            if start_date_tz is not None and commit_dt < start_date_tz:
+                continue
+            if end_date_tz is not None and commit_dt > end_date_tz:
+                continue
+
+            msg = commit.message.strip()
+            c_author_name = commit.author.name or ""
+            c_author_email = commit.author.email or ""
+
+            if query_text:
+                if (
+                    query_text not in commit.hexsha.lower()
+                    and query_text not in msg.lower()
+                    and query_text not in c_author_name.lower()
+                    and query_text not in c_author_email.lower()
+                ):
+                    continue
+
+            files_changed: List[Dict[str, Any]] = []
+            try:
+                for file_path, file_stat in commit.stats.files.items():
+                    clean_path = cls.decode_git_path(file_path)
+                    files_changed.append({
+                        "path": clean_path,
+                        "filename": clean_path.replace("\\", "/").split("/")[-1],
+                        "is_xml": clean_path.lower().endswith(".xml"),
+                        "insertions": file_stat.get("insertions", 0),
+                        "deletions": file_stat.get("deletions", 0),
+                        "lines": file_stat.get("lines", 0),
+                    })
+            except Exception:
+                files_changed = []
+
+            if only_xml and not any(f.get("is_xml") for f in files_changed):
+                continue
+
+            if skipped < skip:
+                skipped += 1
+                continue
+
+            if len(matched_commits) >= limit:
+                has_more = True
+                break
+
+            has_xml = any(f.get("is_xml") for f in files_changed)
+            xml_analysis = cls.analyze_commit_xml_tags(repo, commit.hexsha) if has_xml else {
+                "added": {},
+                "removed": {},
+                "total_added": 0,
+                "total_removed": 0,
+                "total_ics": 0,
+                "flows": {},
+            }
+            author_display = f"{c_author_name} <{c_author_email}>" if c_author_email else c_author_name
+
+            matched_commits.append({
+                "hash": commit.hexsha,
+                "author": author_display,
+                "author_name": c_author_name,
+                "author_email": c_author_email,
+                "commit_date": commit_dt,
+                "message": msg,
+                "files_changed": files_changed,
+                "repo_name": cls.get_repo_name(path),
+                "repo_path": str(path),
+                "commit_url": cls.get_commit_url(path, commit.hexsha),
+                "xml_tags_metrics": xml_analysis,
+                "ic_count": xml_analysis["total_ics"],
+            })
+
+        return matched_commits, has_more
+
+    @classmethod
     def save_commits(
         cls,
         db: Session,

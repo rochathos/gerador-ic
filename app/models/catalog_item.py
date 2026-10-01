@@ -17,6 +17,7 @@ class CatalogItem(Base):
     status: Mapped[str] = mapped_column(
         String(50), default="sugerido", nullable=False, index=True
     )  # sugerido, aprovado, ignorado, criado
+    commit_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
     execution_id: Mapped[Optional[int]] = mapped_column(
         Integer, ForeignKey("execution_history.id", ondelete="SET NULL"), nullable=True, index=True
     )

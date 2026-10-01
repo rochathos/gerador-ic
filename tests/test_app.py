@@ -110,3 +110,48 @@ def test_export_pdf():
     assert response.status_code == 200
     assert "application/pdf" in response.headers["content-type"]
     assert len(response.content) > 0
+
+
+def test_api_commits_git_paged():
+    """Test lazy-load API endpoint /api/commits/git-paged."""
+    response = client.get("/api/commits/git-paged?skip=0&limit=5")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["success"] is True
+    assert "commits" in data
+    assert "has_more" in data
+    assert "next_skip" in data
+    assert isinstance(data["commits"], list)
+
+
+def test_api_commits_inspect_and_save_ic():
+    """Test inspecting commit by hash and saving IC with commit_hash."""
+    # First get a valid commit from paged API
+    response = client.get("/api/commits/git-paged?skip=0&limit=1")
+    assert response.status_code == 200
+    commits = response.json()["commits"]
+    if commits:
+        target_hash = commits[0]["hash"]
+        inspect_res = client.get(f"/api/commits/inspect/{target_hash}")
+        assert inspect_res.status_code == 200
+        inspect_data = inspect_res.json()
+        assert inspect_data["success"] is True
+        assert inspect_data["commit"]["hash"] == target_hash
+
+        # Now create IC with this commit_hash
+        create_res = client.post(
+            "/api/create-ic",
+            json={
+                "title": f"IC para commit {commits[0]['short_hash']}",
+                "description": "Descrição detalhada do commit inspecionado",
+                "commit_hash": target_hash,
+                "status": "sugerido",
+            },
+        )
+        assert create_res.status_code == 200
+        assert create_res.json()["success"] is True
+
+        # Inspect again, now is_saved should be True
+        inspect_res_2 = client.get(f"/api/commits/inspect/{target_hash}")
+        assert inspect_res_2.status_code == 200
+        assert inspect_res_2.json()["commit"]["is_saved"] is True
