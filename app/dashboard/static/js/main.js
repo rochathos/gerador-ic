@@ -683,6 +683,16 @@ function openCreateICModal(commitData) {
     descEl.value = icDesc;
   }
 
+  // Populate Complexity and Quantity fields
+  const complexityEl = document.getElementById("icInputComplexity");
+  if (complexityEl) {
+    complexityEl.value = commit.complexity || "Baixa";
+  }
+  const quantityEl = document.getElementById("icInputQuantity");
+  if (quantityEl) {
+    quantityEl.value = effectiveTotalICs > 0 ? effectiveTotalICs : 1;
+  }
+
   const modal = new bootstrap.Modal(modalEl);
   modal.show();
 }
@@ -878,7 +888,13 @@ async function createICDirectlyInRedmine(btn, isDryRun = false) {
 
   const commitHash = currentModalCommit ? (currentModalCommit.hash || currentModalCommit.short_hash || "") : "";
   const commitUrl = currentModalCommit ? (currentModalCommit.commit_url || currentModalCommit.web_commit_url || "") : "";
-  const icCount = currentModalCommit ? (currentModalCommit.ic_count || 1) : 1;
+
+  // Read complexity and quantity directly from modal inputs
+  const complexityEl = document.getElementById("icInputComplexity");
+  const quantityEl = document.getElementById("icInputQuantity");
+  const complexity = complexityEl ? complexityEl.value : (currentModalCommit && currentModalCommit.complexity ? currentModalCommit.complexity : "Baixa");
+  let icCount = quantityEl ? parseInt(quantityEl.value, 10) : (currentModalCommit ? (currentModalCommit.ic_count || 1) : 1);
+  if (isNaN(icCount) || icCount < 1) icCount = 1;
 
   try {
     const res = await fetch("/api/redmine/create-ic", {
@@ -893,7 +909,7 @@ async function createICDirectlyInRedmine(btn, isDryRun = false) {
         commit_url: commitUrl,
         ic_count: icCount,
         activity_type: "Desenvolvimento - Criar/Manter tarefa de automação",
-        complexity: "Baixa",
+        complexity: complexity,
         dry_run: isDryRun,
       }),
     });

@@ -144,6 +144,28 @@
             <input type="text" class="form-control form-control-custom fw-semibold" id="icInputTitle">
           </div>
 
+          <div class="row g-3 mb-3">
+            <div class="col-12 col-md-6">
+              <label for="icInputComplexity" class="form-label text-muted small fw-bold mb-1 d-flex align-items-center justify-content-between">
+                <span><i class="bi bi-speedometer2 text-warning me-1"></i> [DEVPJE] COMPLEXIDADE:</span>
+                <span class="badge bg-secondary-subtle text-muted fw-normal" style="font-size:0.7rem;">Campo Redmine #456</span>
+              </label>
+              <select class="form-select form-control-custom fw-semibold" id="icInputComplexity">
+                <option value="Baixa" selected>Baixa</option>
+                <option value="Média">Média</option>
+                <option value="Alta">Alta</option>
+                <option value="Especialista">Especialista</option>
+              </select>
+            </div>
+            <div class="col-12 col-md-6">
+              <label for="icInputQuantity" class="form-label text-muted small fw-bold mb-1 d-flex align-items-center justify-content-between">
+                <span><i class="bi bi-123 text-info me-1"></i> [DEVPJE] - QUANTIDADE (AJUSTES XML):</span>
+                <span class="badge bg-secondary-subtle text-muted fw-normal" style="font-size:0.7rem;">Campo Redmine #457</span>
+              </label>
+              <input type="number" min="1" class="form-control form-control-custom fw-semibold font-monospace" id="icInputQuantity" value="1">
+            </div>
+          </div>
+
           <div class="mb-3">
             <div class="d-flex justify-content-between align-items-center mb-1">
               <label for="icInputDesc" class="form-label text-muted small fw-bold mb-0">DESCRIÇÃO DO IC (REDMINE):</label>
