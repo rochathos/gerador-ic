@@ -46,7 +46,7 @@ def test_get_commits_period():
         repo_path=settings.BASE_DIR,
         start_date=start_date,
         end_date=end_date,
-        author="athos",
+        author=settings.GIT_AUTHOR_NAME or None,
     )
 
     assert len(commits) > 0
@@ -96,7 +96,7 @@ def test_xml_files_metrics(db_session):
         repo_path=settings.BASE_DIR,
         start_date=start_date,
         end_date=end_date,
-        author="athos",
+        author=settings.GIT_AUTHOR_NAME or None,
     )
 
     xml_commits = [c for c in saved_commits if c.has_xml_changes]

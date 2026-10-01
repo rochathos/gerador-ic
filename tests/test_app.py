@@ -49,6 +49,7 @@ def test_analyze_endpoint():
     start_str = (now - timedelta(days=2)).strftime("%Y-%m-%dT%H:%M")
     end_str = (now + timedelta(days=1)).strftime("%Y-%m-%dT%H:%M")
 
+    author_param = settings.GIT_AUTHOR_NAME or ""
     # 1. Live query without save_to_db (default)
     response_live = client.post(
         "/analyze",
@@ -56,7 +57,7 @@ def test_analyze_endpoint():
             "start_date": start_str,
             "end_date": end_str,
             "repo_path": str(settings.BASE_DIR),
-            "author": "athos",
+            "author": author_param,
         },
         follow_redirects=False,
     )
@@ -70,7 +71,7 @@ def test_analyze_endpoint():
             "start_date": start_str,
             "end_date": end_str,
             "repo_path": str(settings.BASE_DIR),
-            "author": "athos",
+            "author": author_param,
             "save_to_db": "true",
         },
         follow_redirects=False,
@@ -160,11 +161,15 @@ def test_api_commits_inspect_and_save_ic():
 def test_redmine_api_connection():
     """Test connecting to Redmine API with configured API key."""
     from app.services.redmine_service import RedmineService
-    success, msg, user_data = RedmineService.test_connection()
-    assert success is True
-    assert user_data is not None
-    assert user_data["id"] == 625
-    assert "Athos" in user_data["firstname"]
+    if settings.REDMINE_API_KEY:
+        success, msg, user_data = RedmineService.test_connection()
+        assert success is True
+        assert user_data is not None
+        assert "id" in user_data
+        assert "firstname" in user_data
+    else:
+        success, msg, user_data = RedmineService.test_connection()
+        assert success is False
 
 
 def test_api_redmine_create_ic_validation():

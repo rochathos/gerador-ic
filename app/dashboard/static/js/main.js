@@ -1012,6 +1012,7 @@ async function loadMoreCommits() {
 
   const nextSkip = parseInt(configEl.dataset.nextSkip || "0", 10);
   const query = configEl.dataset.query || "";
+  const author = configEl.dataset.author || "";
   const startDate = configEl.dataset.startDate || "";
   const endDate = configEl.dataset.endDate || "";
   const onlyXml = configEl.dataset.onlyXml === "true";
@@ -1025,6 +1026,7 @@ async function loadMoreCommits() {
       limit: "20",
     });
     if (query) params.append("q", query);
+    if (author) params.append("author", author);
     if (startDate) params.append("start_date", startDate);
     if (endDate) params.append("end_date", endDate);
     if (onlyXml) params.append("only_xml", "true");

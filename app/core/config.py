@@ -34,12 +34,12 @@ class Settings(BaseSettings):
     DEFAULT_GIT_REPO_PATH: str = "C:/ambiente/Git/PJE"
     DEFAULT_REPO_PATH: str = "C:/ambiente/Git/PJE"
     DEFAULT_REPO_NAME: str = "PJE"
-    GIT_AUTHOR_NAME: Optional[str] = "athos.rocha"
-    GIT_AUTHOR_EMAIL: Optional[str] = "athosrocha123@gmail.com"
+    GIT_AUTHOR_NAME: Optional[str] = None
+    GIT_AUTHOR_EMAIL: Optional[str] = None
 
     # Redmine Config (Corporate)
     REDMINE_URL: str = "https://redmine.tjce.jus.br"
-    REDMINE_API_KEY: Optional[str] = "c6f07a5841a2e9bc4471c62201aa8c749b040a14"
+    REDMINE_API_KEY: Optional[str] = None
     REDMINE_PROJECT_ID: int = 52
     REDMINE_TRACKER_ID: int = 156
     REDMINE_USERNAME: Optional[str] = None

@@ -361,12 +361,13 @@ def commits_view(
     start_date: Optional[str] = Query(None),
     end_date: Optional[str] = Query(None),
     q: Optional[str] = Query(None),
+    author: Optional[str] = Query(None),
     only_xml: Optional[bool] = Query(False),
     db: Session = Depends(get_db),
 ):
     """Render commits table querying Git directly in real-time with lazy-loading support."""
     active_repo = settings.DEFAULT_REPO_PATH
-    author_filter = settings.GIT_AUTHOR_NAME or None
+    author_filter = author.strip() if author and author.strip() else (settings.GIT_AUTHOR_NAME or None)
 
     s_dt = None
     e_dt = None
@@ -431,13 +432,14 @@ def commits_view(
             "filter_start_date": start_date or "",
             "filter_end_date": end_date or "",
             "filter_query": q or "",
+            "filter_author": author if author is not None else (settings.GIT_AUTHOR_NAME or ""),
             "only_xml": only_xml,
             "xml_commits_count": xml_commits_count,
             "total_xml_files": total_xml_files,
             "total_xml_ins": total_xml_ins,
             "total_xml_del": total_xml_del,
             "total_xml_edits": total_xml_edits,
-            "author_name": settings.GIT_AUTHOR_NAME,
+            "author_name": author_filter or "Todos os Autores",
         },
     )
 
@@ -447,6 +449,7 @@ def api_commits_git_paged(
     skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=100),
     q: Optional[str] = Query(None),
+    author: Optional[str] = Query(None),
     start_date: Optional[str] = Query(None),
     end_date: Optional[str] = Query(None),
     only_xml: bool = Query(False),
@@ -454,7 +457,7 @@ def api_commits_git_paged(
 ):
     """API endpoint to lazy-load commits directly from Git."""
     active_repo = settings.DEFAULT_REPO_PATH
-    author_filter = settings.GIT_AUTHOR_NAME or None
+    author_filter = author.strip() if author and author.strip() else (settings.GIT_AUTHOR_NAME or None)
 
     s_dt = None
     e_dt = None

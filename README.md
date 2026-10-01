@@ -149,16 +149,21 @@ cd D:\Projetos\gerador-ic
 .venv\Scripts\Activate.ps1
 ```
 
-### 3. Configurar o `.env` (se necessário)
-As credenciais padrão do PostgreSQL local já estão pré-configuradas no `.env`:
+### 3. Configurar o arquivo `.env`
+Copie o arquivo de exemplo `.env.example` para `.env`:
+```powershell
+cp .env.example .env
+```
+Abra o `.env` e preencha as configurações da sua máquina:
 ```ini
-DB_HOST=localhost
-DB_PORT=5432
-DB_USER=postgres
-DB_PASSWORD=12345
-DB_NAME=productivity_assistant
-DEFAULT_GIT_REPO_PATH=D:/Projetos/gerador-ic
-GIT_AUTHOR_NAME=athos.rocha
+# Caminho para o seu repositório local do PJE
+DEFAULT_GIT_REPO_PATH=C:/ambiente/Git/PJE
+# Seu nome de autor no Git (ex: seu.nome ou nome no git config user.name)
+GIT_AUTHOR_NAME=seu.nome
+
+# Sua Chave de Acesso à API do Redmine (obtida em: https://redmine.tjce.jus.br/my/account)
+REDMINE_URL=https://redmine.tjce.jus.br
+REDMINE_API_KEY=sua_chave_de_acesso_api_aqui
 ```
 
 ### 4. Iniciar o Sistema
