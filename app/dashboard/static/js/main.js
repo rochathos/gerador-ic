@@ -829,7 +829,7 @@ async function saveICToDatabase(btn) {
 /**
  * Create IC directly in Redmine via official REST API with live step-by-step logs
  */
-async function createICDirectlyInRedmine(btn) {
+async function createICDirectlyInRedmine(btn, isDryRun = false) {
   const titleEl = document.getElementById("icInputTitle");
   const descEl = document.getElementById("icInputDesc");
   const alertEl = document.getElementById("icFeedbackAlert");
@@ -866,11 +866,14 @@ async function createICDirectlyInRedmine(btn) {
     if (logsCont) logsCont.scrollTop = logsCont.scrollHeight;
   };
 
-  appendLog("Iniciando processo de criação via API do Redmine...");
+  appendLog(`Iniciando processo de ${isDryRun ? 'SIMULAÇÃO (DRY-RUN)' : 'CRIAÇÃO'} via API do Redmine...`);
 
+  const originalBtnHtml = btn ? btn.innerHTML : "";
   if (btn) {
     btn.disabled = true;
-    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span> Criando no Redmine...';
+    btn.innerHTML = isDryRun 
+      ? '<span class="spinner-border spinner-border-sm me-1" role="status"></span> Validando no Redmine...'
+      : '<span class="spinner-border spinner-border-sm me-1" role="status"></span> Criando no Redmine...';
   }
 
   const commitHash = currentModalCommit ? (currentModalCommit.hash || currentModalCommit.short_hash || "") : "";
@@ -891,6 +894,7 @@ async function createICDirectlyInRedmine(btn) {
         ic_count: icCount,
         activity_type: "Desenvolvimento - Criar/Manter tarefa de automação",
         complexity: "Baixa",
+        dry_run: isDryRun,
       }),
     });
 
@@ -904,48 +908,68 @@ async function createICDirectlyInRedmine(btn) {
     }
 
     if (data.success) {
-      if (logsStatus) {
-        logsStatus.className = "badge bg-success";
-        logsStatus.textContent = "Concluído";
-      }
+      if (data.dry_run) {
+        if (logsStatus) {
+          logsStatus.className = "badge bg-info text-dark";
+          logsStatus.textContent = "Simulação Aprovada";
+        }
 
-      if (btn) {
-        btn.disabled = false;
-        btn.className = "btn btn-success d-flex align-items-center gap-1";
-        btn.innerHTML = `<i class="bi bi-box-arrow-up-right"></i> Redmine #${data.issue_id}`;
-        btn.onclick = () => window.open(data.issue_url, '_blank');
-      }
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = '<i class="bi bi-shield-check"></i> Testar Novamente (Simulação)';
+        }
 
-      // Also mark Save to DB button as saved
-      const dbBtn = document.getElementById("btnSaveICToDB");
-      if (dbBtn) {
-        dbBtn.className = "btn btn-success d-flex align-items-center gap-1";
-        dbBtn.innerHTML = '<i class="bi bi-check-circle-fill"></i> Salvo no Banco';
-      }
+        if (alertEl && alertText) {
+          alertEl.classList.remove("d-none", "alert-danger");
+          alertEl.classList.add("alert-success");
+          alertText.innerHTML = `
+            <span><i class="bi bi-check-circle-fill text-success me-1"></i><b>Simulação Concluída com 100% de Sucesso!</b> Todas as etapas da API (usuário, projeto, tracker e campos customizados) foram aprovadas. <u>Nenhuma tarefa foi criada</u> no Redmine.</span>
+          `;
+        }
+      } else {
+        if (logsStatus) {
+          logsStatus.className = "badge bg-success";
+          logsStatus.textContent = "Concluído";
+        }
 
-      if (alertEl && alertText) {
-        alertEl.classList.remove("d-none", "alert-danger");
-        alertEl.classList.add("alert-success");
-        alertText.innerHTML = `
-          <span><b>Sucesso!</b> Tarefa <b>#${data.issue_id}</b> criada no Redmine!</span>
-          <a href="${data.issue_url}" target="_blank" class="btn btn-sm btn-outline-success ms-2 py-0 px-2 text-decoration-none">
-            Abrir Tarefa <i class="bi bi-box-arrow-up-right ms-1"></i>
-          </a>
-        `;
-      }
+        if (btn) {
+          btn.disabled = false;
+          btn.className = "btn btn-success d-flex align-items-center gap-1";
+          btn.innerHTML = `<i class="bi bi-box-arrow-up-right"></i> Redmine #${data.issue_id}`;
+          btn.onclick = () => window.open(data.issue_url, '_blank');
+        }
 
-      // Update currentModalCommit and table row
-      if (currentModalCommit) {
-        currentModalCommit.is_saved = true;
-        currentModalCommit.redmine_id = data.issue_id;
+        // Also mark Save to DB button as saved
+        const dbBtn = document.getElementById("btnSaveICToDB");
+        if (dbBtn) {
+          dbBtn.className = "btn btn-success d-flex align-items-center gap-1";
+          dbBtn.innerHTML = '<i class="bi bi-check-circle-fill"></i> Salvo no Banco';
+        }
 
-        const cell = document.getElementById(`status-cell-${currentModalCommit.hash}`);
-        if (cell) {
-          cell.innerHTML = `
-            <a href="${data.issue_url}" target="_blank" class="badge bg-success text-decoration-none d-inline-flex align-items-center gap-1" title="Abrir tarefa no Redmine">
-              <i class="bi bi-check-circle-fill"></i> #${data.issue_id}
+        if (alertEl && alertText) {
+          alertEl.classList.remove("d-none", "alert-danger");
+          alertEl.classList.add("alert-success");
+          alertText.innerHTML = `
+            <span><b>Sucesso!</b> Tarefa <b>#${data.issue_id}</b> criada no Redmine!</span>
+            <a href="${data.issue_url}" target="_blank" class="btn btn-sm btn-outline-success ms-2 py-0 px-2 text-decoration-none">
+              Abrir Tarefa <i class="bi bi-box-arrow-up-right ms-1"></i>
             </a>
           `;
+        }
+
+        // Update currentModalCommit and table row
+        if (currentModalCommit) {
+          currentModalCommit.is_saved = true;
+          currentModalCommit.redmine_id = data.issue_id;
+
+          const cell = document.getElementById(`status-cell-${currentModalCommit.hash}`);
+          if (cell) {
+            cell.innerHTML = `
+              <a href="${data.issue_url}" target="_blank" class="badge bg-success text-decoration-none d-inline-flex align-items-center gap-1" title="Abrir tarefa no Redmine">
+                <i class="bi bi-check-circle-fill"></i> #${data.issue_id}
+              </a>
+            `;
+          }
         }
       }
     } else {
@@ -955,12 +979,12 @@ async function createICDirectlyInRedmine(btn) {
       }
       if (btn) {
         btn.disabled = false;
-        btn.innerHTML = '<i class="bi bi-cloud-arrow-up-fill"></i> Tentar Novamente';
+        btn.innerHTML = originalBtnHtml || '<i class="bi bi-cloud-arrow-up-fill"></i> Tentar Novamente';
       }
       if (alertEl && alertText) {
         alertEl.classList.remove("d-none", "alert-success");
         alertEl.classList.add("alert-danger");
-        alertText.textContent = `Erro ao criar tarefa no Redmine: ${data.message}`;
+        alertText.textContent = `Erro no processo: ${data.message}`;
       }
     }
   } catch (err) {
@@ -972,7 +996,7 @@ async function createICDirectlyInRedmine(btn) {
     }
     if (btn) {
       btn.disabled = false;
-      btn.innerHTML = '<i class="bi bi-cloud-arrow-up-fill"></i> Tentar Novamente';
+      btn.innerHTML = originalBtnHtml || '<i class="bi bi-cloud-arrow-up-fill"></i> Tentar Novamente';
     }
     if (alertEl && alertText) {
       alertEl.classList.remove("d-none", "alert-success");

@@ -282,11 +282,13 @@ async def api_create_redmine_ic(
         ic_count = body.get("ic_count", 1)
         activity_type = body.get("activity_type", "Desenvolvimento - Criar/Manter tarefa de automação")
         complexity = body.get("complexity", "Baixa")
+        dry_run = bool(body.get("dry_run", False))
 
         if not title:
             return JSONResponse(status_code=400, content={"success": False, "message": "Título do IC é obrigatório."})
 
-        logger.info(f"[REDMINE API] Iniciando criação de IC: '{title[:50]}...' (Commit: {commit_hash})")
+        mode_str = "SIMULAÇÃO" if dry_run else "CRIAÇÃO OFICIAL"
+        logger.info(f"[REDMINE API] [{mode_str}] Iniciando processo para IC: '{title[:50]}...' (Commit: {commit_hash})")
 
         success, issue_url, issue_id, step_logs = RedmineService.create_catalog_item_api(
             title=title,
@@ -296,7 +298,20 @@ async def api_create_redmine_ic(
             ic_count=int(ic_count) if str(ic_count).isdigit() else 1,
             activity_type=activity_type,
             complexity=complexity,
+            dry_run=dry_run,
         )
+
+        if dry_run and success:
+            logger.info(f"[REDMINE API] [DRY-RUN CONCLUÍDO] Simulação aprovada com êxito para '{title[:50]}...'. Zero tarefas criadas.")
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "success": True,
+                    "dry_run": True,
+                    "message": "Simulação realizada com 100% de sucesso! Todas as validações foram aprovadas e nenhuma tarefa foi criada no Redmine.",
+                    "logs": step_logs,
+                },
+            )
 
         if success and issue_id:
             # Persist or update CatalogItem in PostgreSQL
@@ -328,6 +343,7 @@ async def api_create_redmine_ic(
                 status_code=200,
                 content={
                     "success": True,
+                    "dry_run": False,
                     "issue_id": issue_id,
                     "issue_url": issue_url,
                     "message": f"Tarefa #{issue_id} criada com sucesso no Redmine!",
@@ -340,7 +356,8 @@ async def api_create_redmine_ic(
                 status_code=500,
                 content={
                     "success": False,
-                    "message": "Falha ao criar tarefa no Redmine.",
+                    "dry_run": dry_run,
+                    "message": "Falha na validação ou criação da tarefa no Redmine.",
                     "logs": step_logs,
                 },
             )

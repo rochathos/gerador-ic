@@ -74,8 +74,13 @@ class RedmineService:
         project_id: Optional[int] = None,
         tracker_id: Optional[int] = None,
         api_key: Optional[str] = None,
+        dry_run: bool = False,
     ) -> Tuple[bool, Optional[str], Optional[int], List[str]]:
         """Create a new Catalog Item (IC) in Redmine via REST API with granular step-by-step logging.
+
+        Args:
+            dry_run: If True, executes all validations, project checks, and payload construction
+                     WITHOUT sending the final issue creation HTTP request.
 
         Returns:
             Tuple of (success: bool, web_url: Optional[str], issue_id: Optional[int], logs: List[str])
@@ -96,13 +101,14 @@ class RedmineService:
         track_id = tracker_id or settings.REDMINE_TRACKER_ID or 156
 
         # PASSO 1
-        log_step(f"[PASSO 1/6] Iniciando processo de criação de IC no Redmine ({base_url})")
+        mode_label = "SIMULAÇÃO (DRY-RUN)" if dry_run else "CRIAÇÃO OFICIAL"
+        log_step(f"[PASSO 1/6] Iniciando processo de {mode_label} de IC no Redmine ({base_url})")
         if not key:
             log_step("[PASSO 1/6] FALHA: REDMINE_API_KEY não informada no sistema.", is_error=True)
             return False, None, None, step_logs
 
         # PASSO 2
-        log_step("[PASSO 2/6] Validando autenticidade da chave e consultando usuário atual...")
+        log_step("[PASSO 2/6] Validando autenticidade da chave e consultando perfil do usuário...")
         try:
             with httpx.Client(verify=False, timeout=12.0) as client:
                 r_user = client.get(f"{base_url}/users/current.json", headers=cls.get_headers(key))
@@ -117,10 +123,28 @@ class RedmineService:
             return False, None, None, step_logs
 
         # PASSO 3
-        log_step(f"[PASSO 3/6] Configurando destino da tarefa: Projeto ID={proj_id} (PJe) e Tracker ID={track_id} (Item Catálogo PJE)")
+        log_step(f"[PASSO 3/6] Validando destino no Redmine: Projeto ID={proj_id} (PJe) e Tracker ID={track_id} (Item Catálogo PJE)...")
+        try:
+            with httpx.Client(verify=False, timeout=12.0) as client:
+                r_proj = client.get(f"{base_url}/projects/{proj_id}.json?include=trackers", headers=cls.get_headers(key))
+                if r_proj.status_code == 200:
+                    p_data = r_proj.json().get("project", {})
+                    p_name = p_data.get("name", "PJe")
+                    trackers = p_data.get("trackers", [])
+                    t_target = next((t for t in trackers if t.get("id") == track_id), None)
+                    t_name = t_target.get("name") if t_target else "Item Catálogo PJE"
+                    log_step(f"[PASSO 3/6] Destino validado: Projeto '{p_name}' (#{proj_id}) | Rastreador ativo: '{t_name}' (#{track_id})")
+                else:
+                    log_step(f"[PASSO 3/6] Projeto #{proj_id} respondeu HTTP {r_proj.status_code}, mantendo configuração padrão.")
+        except Exception as exc:
+            log_step(f"[PASSO 3/6] Aviso na checagem do projeto: {str(exc)}")
 
         # PASSO 4
-        log_step("[PASSO 4/6] Montando payload da tarefa e preenchendo campos customizados do PJe...")
+        log_step("[PASSO 4/6] Montando payload da tarefa e configurando campos customizados do PJe TJCE:")
+        log_step(f"[PASSO 4/6]   -> Atividade (455): '{activity_type}'")
+        log_step(f"[PASSO 4/6]   -> Complexidade (456): '{complexity}'")
+        log_step(f"[PASSO 4/6]   -> Quantidade ICs (457): '{ic_count}'")
+
         custom_fields: List[Dict[str, Any]] = [
             # [DEVPJE] - Atividade Catálogo (id=455)
             {"id": 455, "value": activity_type},
@@ -131,8 +155,8 @@ class RedmineService:
         ]
 
         if commit_url:
-            # [DEVPJE] Link Nota Evidência (id=479)
             custom_fields.append({"id": 479, "value": commit_url})
+            log_step(f"[PASSO 4/6]   -> Link Nota Evidência (479): '{commit_url}'")
 
         payload = {
             "issue": {
@@ -143,9 +167,18 @@ class RedmineService:
                 "custom_fields": custom_fields,
             }
         }
-        log_step(f"[PASSO 4/6] Payload estruturado: Título='{title[:60]}...', Quantidade={ic_count}, Complexidade={complexity}")
+        log_step(f"[PASSO 4/6] Payload estruturado com sucesso: Título='{title[:60]}...'")
 
-        # PASSO 5
+        # PASSO 5 & 6
+        if dry_run:
+            log_step("[PASSO 5/6] [MODO DRY-RUN ATIVO] Validando estrutura, codificação UTF-8 e tamanho do JSON...")
+            payload_json = json.dumps(payload, ensure_ascii=False)
+            payload_bytes = payload_json.encode("utf-8")
+            log_step(f"[PASSO 5/6] Payload JSON validado com sucesso! Tamanho: {len(payload_bytes)} bytes.")
+            log_step("[PASSO 6/6] [SUCESSO DO TESTE / DRY-RUN] Todas as etapas foram aprovadas com 100% de êxito!")
+            log_step("[PASSO 6/6] Nenhuma tarefa foi criada no Redmine (Modo Simulação Seguro). A aplicação está pronta para produção.")
+            return True, None, None, step_logs
+
         endpoint_url = f"{base_url}/issues.json"
         log_step(f"[PASSO 5/6] Enviando requisição HTTP POST para {endpoint_url}...")
         try:

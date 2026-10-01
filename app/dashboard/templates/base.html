@@ -176,7 +176,10 @@
             <button type="button" class="btn btn-outline-success d-flex align-items-center gap-1" id="btnSaveICToDB" onclick="saveICToDatabase(this)">
               <i class="bi bi-database-add"></i> Salvar no Banco
             </button>
-            <button type="button" class="btn btn-warning text-dark fw-bold d-flex align-items-center gap-1" id="btnCreateICInRedmine" onclick="createICDirectlyInRedmine(this)">
+            <button type="button" class="btn btn-outline-warning d-flex align-items-center gap-1" id="btnSimulateICInRedmine" onclick="createICDirectlyInRedmine(this, true)" title="Valida autenticação, projeto, campos e payload sem criar a tarefa">
+              <i class="bi bi-shield-check"></i> Testar no Redmine (Simulação)
+            </button>
+            <button type="button" class="btn btn-warning text-dark fw-bold d-flex align-items-center gap-1" id="btnCreateICInRedmine" onclick="createICDirectlyInRedmine(this, false)">
               <i class="bi bi-cloud-arrow-up-fill"></i> Criar no Redmine
             </button>
           </div>
