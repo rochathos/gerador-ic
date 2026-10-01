@@ -5,7 +5,7 @@
     xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
         http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
 
-    <changeSet id="20260930-01" author="athos.rocha">
+    <changeSet id="20260930-01" author="dev">
         <createTable tableName="contratos">
             <column name="id" type="BIGINT" autoIncrement="true">
                 <constraints primaryKey="true" nullable="false"/>
@@ -19,7 +19,7 @@
         </createTable>
     </changeSet>
 
-    <changeSet id="20260930-02" author="athos.rocha">
+    <changeSet id="20260930-02" author="dev">
         <addColumn tableName="contratos">
             <column name="observacoes" type="TEXT"/>
         </addColumn>

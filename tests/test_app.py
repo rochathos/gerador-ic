@@ -86,7 +86,7 @@ def test_create_single_ic_endpoint():
         "/api/create-ic",
         json={
             "title": "Ajuste de teste individual",
-            "description": "Commit: 1234567\nData: 30/09/2026\nAutor: athos.rocha",
+            "description": "Commit: 1234567\nData: 30/09/2026\nAutor: desenvolvedor",
             "status": "sugerido",
         },
     )

@@ -314,7 +314,7 @@ def test_build_ic_description_compact_format():
     desc = build_ic_description(
         short_hash="5de7896",
         commit_date=None,
-        author="athos.rocha",
+        author="desenvolvedor",
         message="#291317\nAdição das outras transições faltantes",
         commit_url="https://git.tjce.jus.br/sistemas/PJE/-/commit/5de7896",
         files_changed=files_changed,
