@@ -190,6 +190,45 @@ def test_xml_tags_ic_counting():
     assert "<decision>: 2" in rem_text
     assert "Tags Adicionadas" not in rem_text
 
+    # Test per-flow detailing scenario
+    flow_metrics = {
+        "added": {"transition": 3, "decision": 1},
+        "removed": {"transition": 1},
+        "total_added": 4,
+        "total_removed": 1,
+        "total_ics": 5,
+        "flows": {
+            "Fluxos/1o Grau/Plantao/Transferencia.xml": {
+                "flow_name": "Transferencia.xml",
+                "path": "Fluxos/1o Grau/Plantao/Transferencia.xml",
+                "added": {"transition": 3},
+                "removed": {"transition": 1},
+                "total_added": 3,
+                "total_removed": 1,
+                "total_ics": 4,
+            },
+            "Fluxos/1o Grau/Plantao/Analise.xml": {
+                "flow_name": "Analise.xml",
+                "path": "Fluxos/1o Grau/Plantao/Analise.xml",
+                "added": {"decision": 1},
+                "removed": {},
+                "total_added": 1,
+                "total_removed": 0,
+                "total_ics": 1,
+            }
+        }
+    }
+    norm_flows = normalize_xml_metrics(flow_metrics)
+    assert len(norm_flows["flows"]) == 2
+    f_lines = format_ic_details(norm_flows, 5)
+    f_text = "\n".join(f_lines)
+    assert "Detalhamento por Fluxo (regras do PJE):" in f_text
+    assert "Fluxo: Fluxos/1o Grau/Plantao/Transferencia.xml" in f_text
+    assert "Fluxo: Fluxos/1o Grau/Plantao/Analise.xml" in f_text
+    assert "Tags Adicionadas (+3):" in f_text
+    assert "Tags Removidas (-1):" in f_text
+    assert "Tags Adicionadas (+1):" in f_text
+
 
 def test_decode_git_path():
     """Test decoding of Git octal escape sequences for paths with accents and special characters."""

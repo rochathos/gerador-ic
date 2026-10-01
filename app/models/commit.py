@@ -19,7 +19,7 @@ def decode_git_path(path: str) -> str:
 
 
 def normalize_xml_metrics(raw: Any, default_count: int = 0) -> Dict[str, Any]:
-    """Normalize raw xml_tags_metrics into a standard dict containing added/removed and counts."""
+    """Normalize raw xml_tags_metrics into a standard dict containing added/removed, flows, and counts."""
     if not isinstance(raw, dict):
         return {
             "added": {},
@@ -27,19 +27,22 @@ def normalize_xml_metrics(raw: Any, default_count: int = 0) -> Dict[str, Any]:
             "total_added": 0,
             "total_removed": 0,
             "total_ics": default_count or 0,
+            "flows": {},
         }
-    if "added" in raw or "removed" in raw:
+    if "added" in raw or "removed" in raw or "flows" in raw:
         added = raw.get("added") or {}
         removed = raw.get("removed") or {}
         total_added = raw.get("total_added", sum(added.values()))
         total_removed = raw.get("total_removed", sum(removed.values()))
         total_ics = raw.get("total_ics", total_added + total_removed)
+        flows = raw.get("flows") or {}
         return {
             "added": added,
             "removed": removed,
             "total_added": total_added,
             "total_removed": total_removed,
             "total_ics": total_ics or default_count or 0,
+            "flows": flows,
         }
     # Backward compatibility for flat dict {tag: count}
     total_added = sum(raw.values())
@@ -49,11 +52,12 @@ def normalize_xml_metrics(raw: Any, default_count: int = 0) -> Dict[str, Any]:
         "total_added": total_added,
         "total_removed": 0,
         "total_ics": default_count or total_added,
+        "flows": {},
     }
 
 
 def format_ic_details(parsed_metrics: Dict[str, Any], ic_count: int = 0) -> List[str]:
-    """Helper to generate detailed IC calculation lines showing additions and removals."""
+    """Helper to generate detailed IC calculation lines showing additions and removals per flow (XML file)."""
     total_ics = ic_count or parsed_metrics.get("total_ics", 0)
     if total_ics <= 0:
         return []
@@ -73,19 +77,43 @@ def format_ic_details(parsed_metrics: Dict[str, Any], ic_count: int = 0) -> List
 
     lines.append(f"Itens de Catálogo (IC) calculados: {total_ics} IC(s){summary_str}")
 
-    added_tags = parsed_metrics.get("added", {})
-    removed_tags = parsed_metrics.get("removed", {})
+    flows = parsed_metrics.get("flows") or {}
+    if flows:
+        lines.append("")
+        lines.append("Detalhamento por Fluxo (regras do PJE):")
+        for path, flow_data in flows.items():
+            f_added = flow_data.get("added", {})
+            f_removed = flow_data.get("removed", {})
+            f_total_added = flow_data.get("total_added", sum(f_added.values()))
+            f_total_removed = flow_data.get("total_removed", sum(f_removed.values()))
+            f_total_ics = flow_data.get("total_ics", f_total_added + f_total_removed)
 
-    if added_tags or removed_tags:
-        lines.append("Detalhamento das tags XML (regras do PJE):")
-        if added_tags:
-            lines.append(f"- Tags Adicionadas (+{added_cnt}):")
-            for tag, count in sorted(added_tags.items(), key=lambda x: x[1], reverse=True):
-                lines.append(f"  * <{tag}>: {count}")
-        if removed_tags:
-            lines.append(f"- Tags Removidas (-{removed_cnt}):")
-            for tag, count in sorted(removed_tags.items(), key=lambda x: x[1], reverse=True):
-                lines.append(f"  * <{tag}>: {count}")
+            if f_total_ics == 0:
+                continue
+
+            lines.append("")
+            lines.append(f"Fluxo: {path}")
+            if f_added:
+                lines.append(f"- Tags Adicionadas (+{f_total_added}):")
+                for tag, count in sorted(f_added.items(), key=lambda x: x[1], reverse=True):
+                    lines.append(f"  * <{tag}>: {count}")
+            if f_removed:
+                lines.append(f"- Tags Removidas (-{f_total_removed}):")
+                for tag, count in sorted(f_removed.items(), key=lambda x: x[1], reverse=True):
+                    lines.append(f"  * <{tag}>: {count}")
+    else:
+        added_tags = parsed_metrics.get("added", {})
+        removed_tags = parsed_metrics.get("removed", {})
+        if added_tags or removed_tags:
+            lines.append("Detalhamento das tags XML (regras do PJE):")
+            if added_tags:
+                lines.append(f"- Tags Adicionadas (+{added_cnt}):")
+                for tag, count in sorted(added_tags.items(), key=lambda x: x[1], reverse=True):
+                    lines.append(f"  * <{tag}>: {count}")
+            if removed_tags:
+                lines.append(f"- Tags Removidas (-{removed_cnt}):")
+                for tag, count in sorted(removed_tags.items(), key=lambda x: x[1], reverse=True):
+                    lines.append(f"  * <{tag}>: {count}")
 
     return lines
 

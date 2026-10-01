@@ -27,30 +27,66 @@ class GitService:
         "event",
     }
     TAG_REGEX = re.compile(r"<([a-zA-Z_:][a-zA-Z0-9_.:-]*)")
+    DIFF_GIT_REGEX = re.compile(r'diff --git (?:\"a/|a/)(.*) (?:\"b/|b/)(.*)')
 
     @classmethod
     def analyze_commit_xml_tags(cls, repo: git.Repo, commit_hash: str) -> Dict[str, Any]:
-        """Extract XML tag metrics (both added and removed) from commit diff, following icf.sh counting rules."""
+        """Extract XML tag metrics (both added and removed) globally and per flow from commit diff."""
         added_tags: Dict[str, int] = {}
         removed_tags: Dict[str, int] = {}
+        flows: Dict[str, Dict[str, Any]] = {}
+        current_flow: Optional[str] = None
+
         try:
             patch_output = repo.git.show(commit_hash, "--pretty=format:", "-p", "--", "*.xml")
             if patch_output:
                 for line in patch_output.splitlines():
+                    if line.startswith("diff --git "):
+                        m = cls.DIFF_GIT_REGEX.match(line)
+                        if m:
+                            raw_target = m.group(2).rstrip('"')
+                            current_flow = cls.decode_git_path(raw_target)
+                        else:
+                            current_flow = "arquivo.xml"
+                        if current_flow not in flows:
+                            flows[current_flow] = {
+                                "flow_name": current_flow.split("/")[-1].split("\\")[-1],
+                                "path": current_flow,
+                                "added": {},
+                                "removed": {},
+                                "total_added": 0,
+                                "total_removed": 0,
+                                "total_ics": 0,
+                            }
+                        continue
+
                     if line.startswith("+") and not line.startswith("+++"):
                         match = cls.TAG_REGEX.search(line)
                         if match:
                             tag = match.group(1).lower()
                             if tag not in cls.EXCLUDED_XML_TAGS:
                                 added_tags[tag] = added_tags.get(tag, 0) + 1
+                                if current_flow:
+                                    flow_dict = flows[current_flow]
+                                    flow_dict["added"][tag] = flow_dict["added"].get(tag, 0) + 1
+                                    flow_dict["total_added"] += 1
+                                    flow_dict["total_ics"] += 1
                     elif line.startswith("-") and not line.startswith("---"):
                         match = cls.TAG_REGEX.search(line)
                         if match:
                             tag = match.group(1).lower()
                             if tag not in cls.EXCLUDED_XML_TAGS:
                                 removed_tags[tag] = removed_tags.get(tag, 0) + 1
+                                if current_flow:
+                                    flow_dict = flows[current_flow]
+                                    flow_dict["removed"][tag] = flow_dict["removed"].get(tag, 0) + 1
+                                    flow_dict["total_removed"] += 1
+                                    flow_dict["total_ics"] += 1
         except Exception as exc:
             logger.debug(f"Erro ao extrair diff de tags XML para o commit {commit_hash[:7]}: {exc}")
+
+        # Keep flows that had at least one tag change
+        active_flows = {k: v for k, v in flows.items() if v["total_ics"] > 0}
 
         total_added = sum(added_tags.values())
         total_removed = sum(removed_tags.values())
@@ -61,6 +97,7 @@ class GitService:
             "total_added": total_added,
             "total_removed": total_removed,
             "total_ics": total_ics,
+            "flows": active_flows,
         }
 
     @staticmethod
@@ -253,6 +290,7 @@ class GitService:
                     "total_added": 0,
                     "total_removed": 0,
                     "total_ics": 0,
+                    "flows": {},
                 }
 
                 commit_author_display = f"{commit.author.name} <{commit.author.email}>" if commit.author.email else commit.author.name

@@ -331,6 +331,7 @@ function openCreateICModal(commitData) {
   let removedTags = {};
   let totalAdded = 0;
   let totalRemoved = 0;
+  const flows = rawMetrics.flows || null;
 
   if (rawMetrics.added !== undefined || rawMetrics.removed !== undefined) {
     addedTags = rawMetrics.added || {};
@@ -358,19 +359,49 @@ function openCreateICModal(commitData) {
       countText.textContent = countLabel;
 
       let htmlBadges = "";
-      const addEntries = Object.entries(addedTags).sort((a, b) => b[1] - a[1]);
-      const remEntries = Object.entries(removedTags).sort((a, b) => b[1] - a[1]);
+      if (flows && Object.keys(flows).length > 0) {
+        Object.entries(flows).forEach(([flowPath, flowData]) => {
+          const fAdded = flowData.added || {};
+          const fRemoved = flowData.removed || {};
+          const fTotalAdded = flowData.total_added || Object.values(fAdded).reduce((a, b) => a + b, 0);
+          const fTotalRemoved = flowData.total_removed || Object.values(fRemoved).reduce((a, b) => a + b, 0);
+          const fTotal = flowData.total_ics || (fTotalAdded + fTotalRemoved);
+          if (fTotal === 0) return;
 
-      if (addEntries.length > 0) {
-        htmlBadges += `<div class="d-flex align-items-center gap-1 flex-wrap mb-1"><span class="text-success small fw-bold me-1"><i class="bi bi-plus-circle me-1"></i>Adicionadas (+${totalAdded}):</span>`;
-        htmlBadges += addEntries.map(([t, c]) => `<span class="badge bg-success bg-opacity-25 text-success border border-success-subtle fw-semibold px-2 py-1">&lt;${t}&gt;: ${c}</span>`).join(" ");
-        htmlBadges += `</div>`;
-      }
+          htmlBadges += `<div class="p-2 mb-2 rounded bg-dark bg-opacity-50 border border-secondary border-opacity-25 w-100">`;
+          htmlBadges += `<div class="fw-semibold text-warning small mb-1 d-flex align-items-center justify-content-between"><span><i class="bi bi-file-earmark-code me-1"></i>Fluxo: <span class="text-light">${flowPath}</span></span><span class="badge bg-warning text-dark fw-bold">${fTotal} ICs</span></div>`;
 
-      if (remEntries.length > 0) {
-        htmlBadges += `<div class="d-flex align-items-center gap-1 flex-wrap"><span class="text-danger small fw-bold me-1"><i class="bi bi-dash-circle me-1"></i>Removidas (-${totalRemoved}):</span>`;
-        htmlBadges += remEntries.map(([t, c]) => `<span class="badge bg-danger bg-opacity-25 text-danger border border-danger-subtle fw-semibold px-2 py-1">&lt;${t}&gt;: ${c}</span>`).join(" ");
-        htmlBadges += `</div>`;
+          const fAddEntries = Object.entries(fAdded).sort((a, b) => b[1] - a[1]);
+          const fRemEntries = Object.entries(fRemoved).sort((a, b) => b[1] - a[1]);
+
+          if (fAddEntries.length > 0) {
+            htmlBadges += `<div class="d-flex align-items-center gap-1 flex-wrap mb-1"><span class="text-success small fw-bold me-1"><i class="bi bi-plus-circle me-1"></i>Adicionadas (+${fTotalAdded}):</span>`;
+            htmlBadges += fAddEntries.map(([t, c]) => `<span class="badge bg-success bg-opacity-25 text-success border border-success-subtle fw-semibold px-2 py-1">&lt;${t}&gt;: ${c}</span>`).join(" ");
+            htmlBadges += `</div>`;
+          }
+
+          if (fRemEntries.length > 0) {
+            htmlBadges += `<div class="d-flex align-items-center gap-1 flex-wrap"><span class="text-danger small fw-bold me-1"><i class="bi bi-dash-circle me-1"></i>Removidas (-${fTotalRemoved}):</span>`;
+            htmlBadges += fRemEntries.map(([t, c]) => `<span class="badge bg-danger bg-opacity-25 text-danger border border-danger-subtle fw-semibold px-2 py-1">&lt;${t}&gt;: ${c}</span>`).join(" ");
+            htmlBadges += `</div>`;
+          }
+          htmlBadges += `</div>`;
+        });
+      } else {
+        const addEntries = Object.entries(addedTags).sort((a, b) => b[1] - a[1]);
+        const remEntries = Object.entries(removedTags).sort((a, b) => b[1] - a[1]);
+
+        if (addEntries.length > 0) {
+          htmlBadges += `<div class="d-flex align-items-center gap-1 flex-wrap mb-1"><span class="text-success small fw-bold me-1"><i class="bi bi-plus-circle me-1"></i>Adicionadas (+${totalAdded}):</span>`;
+          htmlBadges += addEntries.map(([t, c]) => `<span class="badge bg-success bg-opacity-25 text-success border border-success-subtle fw-semibold px-2 py-1">&lt;${t}&gt;: ${c}</span>`).join(" ");
+          htmlBadges += `</div>`;
+        }
+
+        if (remEntries.length > 0) {
+          htmlBadges += `<div class="d-flex align-items-center gap-1 flex-wrap"><span class="text-danger small fw-bold me-1"><i class="bi bi-dash-circle me-1"></i>Removidas (-${totalRemoved}):</span>`;
+          htmlBadges += remEntries.map(([t, c]) => `<span class="badge bg-danger bg-opacity-25 text-danger border border-danger-subtle fw-semibold px-2 py-1">&lt;${t}&gt;: ${c}</span>`).join(" ");
+          htmlBadges += `</div>`;
+        }
       }
 
       tagsDetail.innerHTML = htmlBadges || `<span class="text-muted small">Tags válidas calculadas.</span>`;
@@ -417,7 +448,34 @@ function openCreateICModal(commitData) {
         countSummary = ` (-${totalRemoved} remoções)`;
       }
       lines.push(`Itens de Catálogo (IC) calculados: ${effectiveTotalICs} IC(s)${countSummary}`);
-      if (Object.keys(addedTags).length > 0 || Object.keys(removedTags).length > 0) {
+
+      if (flows && Object.keys(flows).length > 0) {
+        lines.push("");
+        lines.push("Detalhamento por Fluxo (regras do PJE):");
+        Object.entries(flows).forEach(([flowPath, flowData]) => {
+          const fAdded = flowData.added || {};
+          const fRemoved = flowData.removed || {};
+          const fTotalAdded = flowData.total_added || Object.values(fAdded).reduce((a, b) => a + b, 0);
+          const fTotalRemoved = flowData.total_removed || Object.values(fRemoved).reduce((a, b) => a + b, 0);
+          const fTotal = flowData.total_ics || (fTotalAdded + fTotalRemoved);
+          if (fTotal === 0) return;
+
+          lines.push("");
+          lines.push(`Fluxo: ${flowPath}`);
+          if (Object.keys(fAdded).length > 0) {
+            lines.push(`- Tags Adicionadas (+${fTotalAdded}):`);
+            Object.entries(fAdded).sort((a, b) => b[1] - a[1]).forEach(([t, c]) => {
+              lines.push(`  * <${t}>: ${c}`);
+            });
+          }
+          if (Object.keys(fRemoved).length > 0) {
+            lines.push(`- Tags Removidas (-${fTotalRemoved}):`);
+            Object.entries(fRemoved).sort((a, b) => b[1] - a[1]).forEach(([t, c]) => {
+              lines.push(`  * <${t}>: ${c}`);
+            });
+          }
+        });
+      } else if (Object.keys(addedTags).length > 0 || Object.keys(removedTags).length > 0) {
         lines.push("Detalhamento das tags XML (regras do PJE):");
         if (Object.keys(addedTags).length > 0) {
           lines.push(`- Tags Adicionadas (+${totalAdded}):`);
