@@ -265,6 +265,32 @@ function viewFiles(commitHash, filesJson) {
   }
 }
 
+function decodeGitPath(path) {
+  if (!path) return "";
+  let clean = String(path).replace(/^["']|["']$/g, "");
+  if (clean.includes("\\")) {
+    try {
+      clean = clean.replace(/\\([0-7]{3})/g, (match, octal) => String.fromCharCode(parseInt(octal, 8)));
+      clean = decodeURIComponent(escape(clean));
+    } catch (e) {}
+  }
+  return clean;
+}
+
+function findFlowMetricsForFile(path, flows) {
+  if (!flows || !path) return null;
+  if (flows[path]) return flows[path];
+  const pNorm = path.replace(/\\/g, "/").trim().toLowerCase();
+  for (const [fPath, fData] of Object.entries(flows)) {
+    if (fPath.replace(/\\/g, "/").trim().toLowerCase() === pNorm) return fData;
+  }
+  const base = pNorm.split("/").pop();
+  for (const [fPath, fData] of Object.entries(flows)) {
+    if (fPath.replace(/\\/g, "/").trim().toLowerCase().split("/").pop() === base) return fData;
+  }
+  return null;
+}
+
 /**
  * Global variable for modal commit state
  */
@@ -448,70 +474,112 @@ function openCreateICModal(commitData) {
         countSummary = ` (-${totalRemoved} remoções)`;
       }
       lines.push(`Itens de Catálogo (IC) calculados: ${effectiveTotalICs} IC(s)${countSummary}`);
-
-      if (flows && Object.keys(flows).length > 0) {
-        lines.push("");
-        lines.push("Detalhamento por Fluxo (regras do PJE):");
-        Object.entries(flows).forEach(([flowPath, flowData]) => {
-          const fAdded = flowData.added || {};
-          const fRemoved = flowData.removed || {};
-          const fTotalAdded = flowData.total_added || Object.values(fAdded).reduce((a, b) => a + b, 0);
-          const fTotalRemoved = flowData.total_removed || Object.values(fRemoved).reduce((a, b) => a + b, 0);
-          const fTotal = flowData.total_ics || (fTotalAdded + fTotalRemoved);
-          if (fTotal === 0) return;
-
-          lines.push("");
-          lines.push(`Fluxo: ${flowPath}`);
-          if (Object.keys(fAdded).length > 0) {
-            lines.push(`- Tags Adicionadas (+${fTotalAdded}):`);
-            Object.entries(fAdded).sort((a, b) => b[1] - a[1]).forEach(([t, c]) => {
-              lines.push(`  * <${t}>: ${c}`);
-            });
-          }
-          if (Object.keys(fRemoved).length > 0) {
-            lines.push(`- Tags Removidas (-${fTotalRemoved}):`);
-            Object.entries(fRemoved).sort((a, b) => b[1] - a[1]).forEach(([t, c]) => {
-              lines.push(`  * <${t}>: ${c}`);
-            });
-          }
-        });
-      } else if (Object.keys(addedTags).length > 0 || Object.keys(removedTags).length > 0) {
-        lines.push("Detalhamento das tags XML (regras do PJE):");
-        if (Object.keys(addedTags).length > 0) {
-          lines.push(`- Tags Adicionadas (+${totalAdded}):`);
-          Object.entries(addedTags).sort((a, b) => b[1] - a[1]).forEach(([t, c]) => {
-            lines.push(`  * <${t}>: ${c}`);
-          });
-        }
-        if (Object.keys(removedTags).length > 0) {
-          lines.push(`- Tags Removidas (-${totalRemoved}):`);
-          Object.entries(removedTags).sort((a, b) => b[1] - a[1]).forEach(([t, c]) => {
-            lines.push(`  * <${t}>: ${c}`);
-          });
-        }
-      }
     }
 
     if (commit.files_changed && commit.files_changed.length > 0) {
       lines.push("");
       lines.push("Arquivos Alterados:");
       let xmlCount = 0;
+      const matchedFlows = new Set();
+
       commit.files_changed.forEach(f => {
         const isObj = typeof f === "object";
-        const path = isObj ? (f.path || f.filename) : String(f);
+        const rawPath = isObj ? (f.path || f.filename) : String(f);
+        const path = decodeGitPath(rawPath);
         const isXml = isObj ? f.is_xml : path.toLowerCase().endsWith(".xml");
         const ins = isObj ? (f.insertions || 0) : 0;
         const del = isObj ? (f.deletions || 0) : 0;
         const diff = (ins || del) ? ` (+${ins} / -${del})` : "";
+
         if (isXml) {
           xmlCount++;
           lines.push(`- [XML] ${path}${diff}`);
+
+          const flowData = findFlowMetricsForFile(path, flows);
+          if (flowData) {
+            matchedFlows.add(flowData.path || path);
+            const fAdded = flowData.added || {};
+            const fRemoved = flowData.removed || {};
+            const fTotalAdded = flowData.total_added || Object.values(fAdded).reduce((a, b) => a + b, 0);
+            const fTotalRemoved = flowData.total_removed || Object.values(fRemoved).reduce((a, b) => a + b, 0);
+
+            if (Object.keys(fAdded).length > 0) {
+              const addParts = Object.entries(fAdded).sort((a, b) => b[1] - a[1]).map(([t, c]) => `<${t}>: ${c}`).join(", ");
+              lines.push(`  * Tags Adicionadas (+${fTotalAdded}): ${addParts}`);
+            }
+            if (Object.keys(fRemoved).length > 0) {
+              const remParts = Object.entries(fRemoved).sort((a, b) => b[1] - a[1]).map(([t, c]) => `<${t}>: ${c}`).join(", ");
+              lines.push(`  * Tags Removidas (-${fTotalRemoved}): ${remParts}`);
+            }
+          }
         } else {
           lines.push(`- ${path}${diff}`);
         }
       });
+
+      // Fallback for flows not in files_changed
+      if (flows) {
+        Object.entries(flows).forEach(([fPath, fData]) => {
+          if ((fData.total_ics || 0) > 0 && !matchedFlows.has(fPath)) {
+            const flowCheck = findFlowMetricsForFile(fPath, Object.fromEntries([...matchedFlows].map(p => [p, {}])));
+            if (!flowCheck) {
+              xmlCount++;
+              lines.push(`- [XML] ${fPath}`);
+              const fAdded = fData.added || {};
+              const fRemoved = fData.removed || {};
+              const fTotalAdded = fData.total_added || Object.values(fAdded).reduce((a, b) => a + b, 0);
+              const fTotalRemoved = fData.total_removed || Object.values(fRemoved).reduce((a, b) => a + b, 0);
+              if (Object.keys(fAdded).length > 0) {
+                const addParts = Object.entries(fAdded).sort((a, b) => b[1] - a[1]).map(([t, c]) => `<${t}>: ${c}`).join(", ");
+                lines.push(`  * Tags Adicionadas (+${fTotalAdded}): ${addParts}`);
+              }
+              if (Object.keys(fRemoved).length > 0) {
+                const remParts = Object.entries(fRemoved).sort((a, b) => b[1] - a[1]).map(([t, c]) => `<${t}>: ${c}`).join(", ");
+                lines.push(`  * Tags Removidas (-${fTotalRemoved}): ${remParts}`);
+              }
+            }
+          }
+        });
+      }
+
       if (xmlCount > 0) {
         lines.push(`(Total de arquivos XML alterados: ${xmlCount})`);
+      }
+    } else if (flows && Object.keys(flows).length > 0) {
+      lines.push("");
+      lines.push("Arquivos Alterados:");
+      let xmlCount = 0;
+      Object.entries(flows).forEach(([fPath, fData]) => {
+        if ((fData.total_ics || 0) > 0) {
+          xmlCount++;
+          lines.push(`- [XML] ${fPath}`);
+          const fAdded = fData.added || {};
+          const fRemoved = fData.removed || {};
+          const fTotalAdded = fData.total_added || Object.values(fAdded).reduce((a, b) => a + b, 0);
+          const fTotalRemoved = fData.total_removed || Object.values(fRemoved).reduce((a, b) => a + b, 0);
+          if (Object.keys(fAdded).length > 0) {
+            const addParts = Object.entries(fAdded).sort((a, b) => b[1] - a[1]).map(([t, c]) => `<${t}>: ${c}`).join(", ");
+            lines.push(`  * Tags Adicionadas (+${fTotalAdded}): ${addParts}`);
+          }
+          if (Object.keys(fRemoved).length > 0) {
+            const remParts = Object.entries(fRemoved).sort((a, b) => b[1] - a[1]).map(([t, c]) => `<${t}>: ${c}`).join(", ");
+            lines.push(`  * Tags Removidas (-${fTotalRemoved}): ${remParts}`);
+          }
+        }
+      });
+      if (xmlCount > 0) {
+        lines.push(`(Total de arquivos XML alterados: ${xmlCount})`);
+      }
+    } else if (effectiveTotalICs > 0 && (Object.keys(addedTags).length > 0 || Object.keys(removedTags).length > 0)) {
+      lines.push("");
+      lines.push("Tags XML Alteradas:");
+      if (Object.keys(addedTags).length > 0) {
+        const addParts = Object.entries(addedTags).sort((a, b) => b[1] - a[1]).map(([t, c]) => `<${t}>: ${c}`).join(", ");
+        lines.push(`- Tags Adicionadas (+${totalAdded}): ${addParts}`);
+      }
+      if (Object.keys(removedTags).length > 0) {
+        const remParts = Object.entries(removedTags).sort((a, b) => b[1] - a[1]).map(([t, c]) => `<${t}>: ${c}`).join(", ");
+        lines.push(`- Tags Removidas (-${totalRemoved}): ${remParts}`);
       }
     }
     icDesc = lines.join("\n");

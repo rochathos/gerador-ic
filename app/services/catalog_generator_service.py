@@ -2,7 +2,7 @@ from typing import List, Dict, Any, Optional
 from sqlalchemy.orm import Session
 from app.core.logger import logger
 from app.models.catalog_item import CatalogItem
-from app.models.commit import normalize_xml_metrics, format_ic_details, decode_git_path
+from app.models.commit import normalize_xml_metrics, format_ic_details, decode_git_path, build_ic_description
 
 
 class CatalogGeneratorService:
@@ -40,54 +40,16 @@ class CatalogGeneratorService:
         first_line = msg.split("\n")[0].strip() if msg else "Atividade de Desenvolvimento"
         title = first_line[:180]
 
-        # Date formatting
-        date_str = ""
-        if commit_date:
-            try:
-                date_str = commit_date.strftime("%d/%m/%Y %H:%M")
-            except Exception:
-                date_str = str(commit_date)
-
-        # Build clean, detailed description for Redmine IC
-        desc_lines = [
-            f"Commit: {short_hash}",
-            f"Data: {date_str}",
-            f"Autor: {author}",
-        ]
-        if commit_url:
-            desc_lines.append(f"Link: {commit_url}")
-
-        desc_lines.append("")
-        desc_lines.append("Descrição:")
-        desc_lines.append(msg)
-
-        # IC Calculation details based on icf.sh (additions and removals)
-        desc_lines.extend(format_ic_details(parsed_metrics, total_ics))
-
-        # Files changed and XML highlights
-        if files_changed:
-            desc_lines.append("")
-            desc_lines.append("Arquivos Alterados:")
-            xml_count = 0
-            for f in files_changed:
-                if isinstance(f, dict):
-                    raw_path = f.get("path") or f.get("filename") or ""
-                    path = decode_git_path(raw_path)
-                    ins = f.get("insertions", 0)
-                    dels = f.get("deletions", 0)
-                    diff_info = f" (+{ins} / -{dels})" if (ins or dels) else ""
-                    if f.get("is_xml") or path.lower().endswith(".xml"):
-                        xml_count += 1
-                        desc_lines.append(f"- [XML] {path}{diff_info}")
-                    else:
-                        desc_lines.append(f"- {path}{diff_info}")
-                else:
-                    desc_lines.append(f"- {decode_git_path(str(f))}")
-
-            if xml_count > 0:
-                desc_lines.append(f"(Total de arquivos XML alterados: {xml_count})")
-
-        description = "\n".join(desc_lines)
+        description = build_ic_description(
+            short_hash=short_hash,
+            commit_date=commit_date,
+            author=author,
+            message=msg,
+            commit_url=commit_url,
+            files_changed=files_changed,
+            xml_tags_metrics=raw_xml_tags,
+            ic_count=total_ics,
+        )
 
         return {
             "title": title,

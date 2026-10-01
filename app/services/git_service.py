@@ -19,7 +19,6 @@ class GitService:
         "end-state",
         "process-definition",
         "start-state",
-        "condition",
         "assignment",
         "controller",
         "task",

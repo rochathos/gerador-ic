@@ -118,6 +118,160 @@ def format_ic_details(parsed_metrics: Dict[str, Any], ic_count: int = 0) -> List
     return lines
 
 
+def find_flow_metrics_for_file(path: str, flows: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Match a file path against the flows dictionary by exact path, normalized path, or basename."""
+    if not flows or not path:
+        return None
+    if path in flows:
+        return flows[path]
+    norm_path = path.replace("\\", "/").strip().lower()
+    for f_path, f_data in flows.items():
+        if f_path.replace("\\", "/").strip().lower() == norm_path:
+            return f_data
+    base = norm_path.split("/")[-1]
+    for f_path, f_data in flows.items():
+        if f_path.replace("\\", "/").strip().lower().split("/")[-1] == base:
+            return f_data
+    return None
+
+
+def format_flow_tags_lines(flow_data: Dict[str, Any]) -> List[str]:
+    """Format tags touched for a specific flow into compact bullet lines."""
+    lines: List[str] = []
+    f_added = flow_data.get("added", {})
+    f_removed = flow_data.get("removed", {})
+    f_total_added = flow_data.get("total_added", sum(f_added.values()))
+    f_total_removed = flow_data.get("total_removed", sum(f_removed.values()))
+
+    if f_added:
+        add_items = [f"<{t}>: {c}" for t, c in sorted(f_added.items(), key=lambda x: x[1], reverse=True)]
+        lines.append(f"  * Tags Adicionadas (+{f_total_added}): {', '.join(add_items)}")
+    if f_removed:
+        rem_items = [f"<{t}>: {c}" for t, c in sorted(f_removed.items(), key=lambda x: x[1], reverse=True)]
+        lines.append(f"  * Tags Removidas (-{f_total_removed}): {', '.join(rem_items)}")
+
+    return lines
+
+
+def build_ic_description(
+    short_hash: str,
+    commit_date: Any,
+    author: str,
+    message: str,
+    commit_url: str = "",
+    files_changed: Optional[List[Any]] = None,
+    xml_tags_metrics: Optional[Dict[str, Any]] = None,
+    ic_count: int = 0,
+) -> str:
+    """Build the clean, compact Redmine IC description.
+
+    Tags touched are displayed directly below each altered XML file (fluxo) in 'Arquivos Alterados:',
+    making the text shorter, more readable, and avoiding duplicate flow sections.
+    """
+    date_str = ""
+    if commit_date:
+        try:
+            date_str = commit_date.strftime("%d/%m/%Y %H:%M")
+        except Exception:
+            date_str = str(commit_date)
+
+    parsed_metrics = normalize_xml_metrics(xml_tags_metrics or {}, ic_count)
+    total_ics = ic_count or parsed_metrics.get("total_ics", 0)
+    flows = parsed_metrics.get("flows") or {}
+
+    lines = [
+        f"Commit: {short_hash}",
+        f"Data: {date_str}",
+        f"Autor: {author}",
+    ]
+    if commit_url:
+        lines.append(f"Link: {commit_url}")
+
+    lines.append("")
+    lines.append("Descrição:")
+    lines.append(message.strip() if message else "")
+
+    added_cnt = parsed_metrics.get("total_added", 0)
+    removed_cnt = parsed_metrics.get("total_removed", 0)
+    if total_ics > 0:
+        if added_cnt > 0 and removed_cnt > 0:
+            summary_str = f" ({added_cnt} adicionadas, {removed_cnt} removidas)"
+        elif added_cnt > 0:
+            summary_str = f" (+{added_cnt} adições)"
+        elif removed_cnt > 0:
+            summary_str = f" (-{removed_cnt} remoções)"
+        else:
+            summary_str = ""
+        lines.append("")
+        lines.append(f"Itens de Catálogo (IC) calculados: {total_ics} IC(s){summary_str}")
+
+    clean_files = files_changed or []
+    if clean_files:
+        lines.append("")
+        lines.append("Arquivos Alterados:")
+        xml_count = 0
+        matched_flow_paths = set()
+
+        for f in clean_files:
+            if isinstance(f, dict):
+                raw_path = f.get("path") or f.get("filename") or ""
+                path = decode_git_path(raw_path)
+                ins = f.get("insertions", 0)
+                dels = f.get("deletions", 0)
+                diff_info = f" (+{ins} / -{dels})" if (ins or dels) else ""
+                is_xml = f.get("is_xml") or path.lower().endswith(".xml")
+            else:
+                path = decode_git_path(str(f))
+                diff_info = ""
+                is_xml = path.lower().endswith(".xml")
+
+            if is_xml:
+                xml_count += 1
+                lines.append(f"- [XML] {path}{diff_info}")
+                flow_data = find_flow_metrics_for_file(path, flows)
+                if flow_data:
+                    matched_flow_paths.add(flow_data.get("path", path))
+                    lines.extend(format_flow_tags_lines(flow_data))
+            else:
+                lines.append(f"- {path}{diff_info}")
+
+        # In case some flows were not in files_changed (fallback)
+        for f_path, f_data in flows.items():
+            if f_data.get("total_ics", 0) > 0 and f_path not in matched_flow_paths:
+                flow_check = find_flow_metrics_for_file(f_path, {p: {} for p in matched_flow_paths})
+                if not flow_check:
+                    xml_count += 1
+                    lines.append(f"- [XML] {f_path}")
+                    lines.extend(format_flow_tags_lines(f_data))
+
+        if xml_count > 0:
+            lines.append(f"(Total de arquivos XML alterados: {xml_count})")
+    elif flows:
+        lines.append("")
+        lines.append("Arquivos Alterados:")
+        xml_count = 0
+        for f_path, f_data in flows.items():
+            if f_data.get("total_ics", 0) > 0:
+                xml_count += 1
+                lines.append(f"- [XML] {f_path}")
+                lines.extend(format_flow_tags_lines(f_data))
+        if xml_count > 0:
+            lines.append(f"(Total de arquivos XML alterados: {xml_count})")
+    elif total_ics > 0 and (added_cnt > 0 or removed_cnt > 0):
+        lines.append("")
+        lines.append("Tags XML Alteradas:")
+        added_tags = parsed_metrics.get("added", {})
+        removed_tags = parsed_metrics.get("removed", {})
+        if added_tags:
+            add_items = [f"<{t}>: {c}" for t, c in sorted(added_tags.items(), key=lambda x: x[1], reverse=True)]
+            lines.append(f"- Tags Adicionadas (+{added_cnt}): {', '.join(add_items)}")
+        if removed_tags:
+            rem_items = [f"<{t}>: {c}" for t, c in sorted(removed_tags.items(), key=lambda x: x[1], reverse=True)]
+            lines.append(f"- Tags Removidas (-{removed_cnt}): {', '.join(rem_items)}")
+
+    return "\n".join(lines)
+
+
 class Commit(Base):
     """Stores Git commit information retrieved by Productivity Assistant."""
 
@@ -244,37 +398,16 @@ class Commit(Base):
 
     @property
     def ic_description(self) -> str:
-        date_str = self.commit_date.strftime("%d/%m/%Y %H:%M") if self.commit_date else ""
-        link = self.web_commit_url or self.commit_url or ""
-        lines = [
-            f"Commit: {self.short_hash}",
-            f"Data: {date_str}",
-            f"Autor: {self.author}",
-        ]
-        if link:
-            lines.append(f"Link: {link}")
-        lines.append("")
-        lines.append("Descrição:")
-        lines.append(self.message.strip() if self.message else "")
-        if self.files_changed:
-            lines.append("")
-            lines.append("Arquivos Alterados:")
-            xml_count = 0
-            for f in self.files_changed_clean:
-                path = f.get("path") or f.get("filename") or ""
-                ins = f.get("insertions", 0)
-                dels = f.get("deletions", 0)
-                diff_info = f" (+{ins} / -{dels})" if (ins or dels) else ""
-                if f.get("is_xml"):
-                    xml_count += 1
-                    lines.append(f"- [XML] {path}{diff_info}")
-                else:
-                    lines.append(f"- {path}{diff_info}")
-            if xml_count > 0:
-                lines.append(f"(Total de arquivos XML alterados: {xml_count})")
-
-        lines.extend(format_ic_details(self.ic_metrics_parsed, getattr(self, "ic_count", 0) or 0))
-        return "\n".join(lines)
+        return build_ic_description(
+            short_hash=self.short_hash,
+            commit_date=self.commit_date,
+            author=self.author,
+            message=self.message,
+            commit_url=self.web_commit_url or self.commit_url or "",
+            files_changed=self.files_changed_clean,
+            xml_tags_metrics=self.xml_tags_metrics,
+            ic_count=getattr(self, "ic_count", 0) or 0,
+        )
 
     def to_dict(self) -> Dict[str, Any]:
         parsed_metrics = self.ic_metrics_parsed
@@ -403,42 +536,16 @@ class CommitItem:
 
     @property
     def ic_description(self) -> str:
-        date_str = ""
-        if self.commit_date:
-            try:
-                date_str = self.commit_date.strftime("%d/%m/%Y %H:%M")
-            except Exception:
-                date_str = str(self.commit_date)
-        link = self.web_commit_url or self.commit_url or ""
-        lines = [
-            f"Commit: {self.short_hash}",
-            f"Data: {date_str}",
-            f"Autor: {self.author}",
-        ]
-        if link:
-            lines.append(f"Link: {link}")
-        lines.append("")
-        lines.append("Descrição:")
-        lines.append(self.message.strip() if self.message else "")
-        if self.files_changed:
-            lines.append("")
-            lines.append("Arquivos Alterados:")
-            xml_count = 0
-            for f in self.files_changed_clean:
-                path = f.get("path") or f.get("filename") or ""
-                ins = f.get("insertions", 0)
-                dels = f.get("deletions", 0)
-                diff_info = f" (+{ins} / -{dels})" if (ins or dels) else ""
-                if f.get("is_xml"):
-                    xml_count += 1
-                    lines.append(f"- [XML] {path}{diff_info}")
-                else:
-                    lines.append(f"- {path}{diff_info}")
-            if xml_count > 0:
-                lines.append(f"(Total de arquivos XML alterados: {xml_count})")
-
-        lines.extend(format_ic_details(self.ic_metrics_parsed, self.ic_count or 0))
-        return "\n".join(lines)
+        return build_ic_description(
+            short_hash=self.short_hash,
+            commit_date=self.commit_date,
+            author=self.author,
+            message=self.message,
+            commit_url=self.web_commit_url or self.commit_url or "",
+            files_changed=self.files_changed_clean,
+            xml_tags_metrics=self.xml_tags_metrics,
+            ic_count=self.ic_count or 0,
+        )
 
     def to_dict(self) -> Dict[str, Any]:
         date_str = ""

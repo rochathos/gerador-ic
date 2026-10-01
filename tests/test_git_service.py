@@ -113,11 +113,11 @@ def test_xml_files_metrics(db_session):
 
 def test_xml_tags_ic_counting():
     """Test XML tag counting rule matching icf.sh (filtering excluded tags)."""
-    # Test exclusion set from icf.sh
+    # Test exclusion set from icf.sh (with condition removed so it counts as IC)
     assert "process-definition" in GitService.EXCLUDED_XML_TAGS
     assert "start-state" in GitService.EXCLUDED_XML_TAGS
     assert "end-state" in GitService.EXCLUDED_XML_TAGS
-    assert "condition" in GitService.EXCLUDED_XML_TAGS
+    assert "condition" not in GitService.EXCLUDED_XML_TAGS
     assert "assignment" in GitService.EXCLUDED_XML_TAGS
     assert "controller" in GitService.EXCLUDED_XML_TAGS
     assert "task" in GitService.EXCLUDED_XML_TAGS
@@ -138,6 +138,13 @@ def test_xml_tags_ic_counting():
     tag2 = m2.group(1).lower()
     assert tag2 in GitService.EXCLUDED_XML_TAGS
 
+    # Test condition tag is counted when added or removed
+    line_cond = '+   <condition expression="#{parametroUtil.getParametro(...)}"/>'
+    m_cond = GitService.TAG_REGEX.search(line_cond)
+    assert m_cond is not None
+    assert m_cond.group(1).lower() == "condition"
+    assert m_cond.group(1).lower() not in GitService.EXCLUDED_XML_TAGS
+
     # Test regex tag parsing for removals (-)
     line3 = '-   <decision name="Decisao Antiga">'
     m3 = GitService.TAG_REGEX.search(line3)
@@ -146,7 +153,7 @@ def test_xml_tags_ic_counting():
     assert tag3 == "decision"
     assert tag3 not in GitService.EXCLUDED_XML_TAGS
 
-    line4 = '-   <condition expression="#{false}"/>'
+    line4 = '-   <event type="node-enter"/>'
     m4 = GitService.TAG_REGEX.search(line4)
     assert m4 is not None
     tag4 = m4.group(1).lower()
@@ -249,3 +256,82 @@ def test_decode_git_path():
     # None and empty
     assert decode_git_path("") == ""
     assert decode_git_path(None) == ""
+
+
+def test_build_ic_description_compact_format():
+    """Test build_ic_description generates compact description with tags placed directly under each XML file."""
+    from app.models.commit import build_ic_description
+
+    files_changed = [
+        {
+            "path": "Fluxos/1o Grau/Criminal/Análise de Secretaria - Crimes Tráfico de Drogas.xml",
+            "insertions": 15,
+            "deletions": 2,
+            "is_xml": True,
+        },
+        {
+            "path": "Fluxos/1o Grau/Criminal/Análise de Secretaria - VDOC.xml",
+            "insertions": 1,
+            "deletions": 1,
+            "is_xml": True,
+        },
+        {
+            "path": "src/main/resources/application.properties",
+            "insertions": 2,
+            "deletions": 0,
+            "is_xml": False,
+        }
+    ]
+
+    xml_tags_metrics = {
+        "added": {"transition": 4, "condition": 1},
+        "removed": {"condition": 1},
+        "total_added": 5,
+        "total_removed": 1,
+        "total_ics": 6,
+        "flows": {
+            "Fluxos/1o Grau/Criminal/Análise de Secretaria - Crimes Tráfico de Drogas.xml": {
+                "flow_name": "Crimes Tráfico de Drogas.xml",
+                "path": "Fluxos/1o Grau/Criminal/Análise de Secretaria - Crimes Tráfico de Drogas.xml",
+                "added": {"transition": 4},
+                "removed": {},
+                "total_added": 4,
+                "total_removed": 0,
+                "total_ics": 4,
+            },
+            "Fluxos/1o Grau/Criminal/Análise de Secretaria - VDOC.xml": {
+                "flow_name": "VDOC.xml",
+                "path": "Fluxos/1o Grau/Criminal/Análise de Secretaria - VDOC.xml",
+                "added": {"condition": 1},
+                "removed": {"condition": 1},
+                "total_added": 1,
+                "total_removed": 1,
+                "total_ics": 2,
+            }
+        }
+    }
+
+    desc = build_ic_description(
+        short_hash="5de7896",
+        commit_date=None,
+        author="athos.rocha",
+        message="#291317\nAdição das outras transições faltantes",
+        commit_url="https://git.tjce.jus.br/sistemas/PJE/-/commit/5de7896",
+        files_changed=files_changed,
+        xml_tags_metrics=xml_tags_metrics,
+        ic_count=6,
+    )
+
+    assert "Commit: 5de7896" in desc
+    assert "Itens de Catálogo (IC) calculados: 6 IC(s) (5 adicionadas, 1 removidas)" in desc
+    assert "Arquivos Alterados:" in desc
+    # Checks that tags are placed under the XML file
+    assert "- [XML] Fluxos/1o Grau/Criminal/Análise de Secretaria - Crimes Tráfico de Drogas.xml (+15 / -2)" in desc
+    assert "  * Tags Adicionadas (+4): <transition>: 4" in desc
+    assert "- [XML] Fluxos/1o Grau/Criminal/Análise de Secretaria - VDOC.xml (+1 / -1)" in desc
+    assert "  * Tags Adicionadas (+1): <condition>: 1" in desc
+    assert "  * Tags Removidas (-1): <condition>: 1" in desc
+    assert "- src/main/resources/application.properties (+2 / -0)" in desc
+    assert "(Total de arquivos XML alterados: 2)" in desc
+    # Ensure redundant section was removed
+    assert "Detalhamento por Fluxo" not in desc
