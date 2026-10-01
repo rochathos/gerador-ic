@@ -155,3 +155,25 @@ def test_api_commits_inspect_and_save_ic():
         inspect_res_2 = client.get(f"/api/commits/inspect/{target_hash}")
         assert inspect_res_2.status_code == 200
         assert inspect_res_2.json()["commit"]["is_saved"] is True
+
+
+def test_redmine_api_connection():
+    """Test connecting to Redmine API with configured API key."""
+    from app.services.redmine_service import RedmineService
+    success, msg, user_data = RedmineService.test_connection()
+    assert success is True
+    assert user_data is not None
+    assert user_data["id"] == 625
+    assert "Athos" in user_data["firstname"]
+
+
+def test_api_redmine_create_ic_validation():
+    """Test POST /api/redmine/create-ic validation."""
+    response = client.post(
+        "/api/redmine/create-ic",
+        json={"title": "", "description": "Sem titulo"},
+    )
+    assert response.status_code == 400
+    data = response.json()
+    assert data["success"] is False
+

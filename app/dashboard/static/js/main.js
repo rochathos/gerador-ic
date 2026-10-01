@@ -382,9 +382,41 @@ function openCreateICModal(commitData) {
     alertText.textContent = "";
   }
   if (saveBtn) {
-    saveBtn.disabled = false;
-    saveBtn.innerHTML = '<i class="bi bi-database-add"></i> Salvar no Banco';
-    saveBtn.className = "btn btn-outline-success d-flex align-items-center gap-1";
+    if (commit.is_saved) {
+      saveBtn.disabled = true;
+      saveBtn.innerHTML = '<i class="bi bi-check-circle-fill"></i> Salvo no Banco';
+      saveBtn.className = "btn btn-success d-flex align-items-center gap-1";
+    } else {
+      saveBtn.disabled = false;
+      saveBtn.innerHTML = '<i class="bi bi-database-add"></i> Salvar no Banco';
+      saveBtn.className = "btn btn-outline-success d-flex align-items-center gap-1";
+    }
+  }
+
+  // Reset Redmine button & logs
+  const redmineBtn = document.getElementById("btnCreateICInRedmine");
+  if (redmineBtn) {
+    if (commit.redmine_id) {
+      redmineBtn.className = "btn btn-success d-flex align-items-center gap-1";
+      redmineBtn.innerHTML = `<i class="bi bi-box-arrow-up-right"></i> Redmine #${commit.redmine_id}`;
+      redmineBtn.disabled = false;
+      redmineBtn.onclick = () => window.open(`https://redmine.tjce.jus.br/issues/${commit.redmine_id}`, '_blank');
+    } else {
+      redmineBtn.className = "btn btn-warning text-dark fw-bold d-flex align-items-center gap-1";
+      redmineBtn.innerHTML = '<i class="bi bi-cloud-arrow-up-fill"></i> Criar no Redmine';
+      redmineBtn.disabled = false;
+      redmineBtn.onclick = function() { createICDirectlyInRedmine(this); };
+    }
+  }
+
+  const redmineLogsCont = document.getElementById("icRedmineLogsContainer");
+  const redmineLogsList = document.getElementById("icRedmineLogsList");
+  const redmineLogsStatus = document.getElementById("icRedmineLogsStatus");
+  if (redmineLogsCont) redmineLogsCont.classList.add("d-none");
+  if (redmineLogsList) redmineLogsList.innerHTML = "";
+  if (redmineLogsStatus) {
+    redmineLogsStatus.className = "badge bg-secondary";
+    redmineLogsStatus.textContent = "Aguardando";
   }
 
   // Populate badge
@@ -793,6 +825,164 @@ async function saveICToDatabase(btn) {
     }
   }
 }
+
+/**
+ * Create IC directly in Redmine via official REST API with live step-by-step logs
+ */
+async function createICDirectlyInRedmine(btn) {
+  const titleEl = document.getElementById("icInputTitle");
+  const descEl = document.getElementById("icInputDesc");
+  const alertEl = document.getElementById("icFeedbackAlert");
+  const alertText = document.getElementById("icFeedbackText");
+  const logsCont = document.getElementById("icRedmineLogsContainer");
+  const logsList = document.getElementById("icRedmineLogsList");
+  const logsStatus = document.getElementById("icRedmineLogsStatus");
+
+  const title = titleEl ? titleEl.value.trim() : "";
+  const description = descEl ? descEl.value.trim() : "";
+
+  if (!title) {
+    if (alertEl && alertText) {
+      alertEl.classList.remove("d-none", "alert-success");
+      alertEl.classList.add("alert-danger");
+      alertText.textContent = "Por favor, informe o título do Item de Catálogo.";
+    }
+    return;
+  }
+
+  if (logsCont) logsCont.classList.remove("d-none");
+  if (logsList) logsList.innerHTML = "";
+  if (logsStatus) {
+    logsStatus.className = "badge bg-warning text-dark";
+    logsStatus.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span> Executando';
+  }
+
+  const appendLog = (msg, isError = false) => {
+    if (!logsList) return;
+    const div = document.createElement("div");
+    div.className = isError ? "text-danger" : "text-light";
+    div.innerHTML = `<span class="${isError ? 'text-danger' : 'text-success'} me-1">${isError ? '✖' : '✔'}</span> ${escapeHtml(msg)}`;
+    logsList.appendChild(div);
+    if (logsCont) logsCont.scrollTop = logsCont.scrollHeight;
+  };
+
+  appendLog("Iniciando processo de criação via API do Redmine...");
+
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span> Criando no Redmine...';
+  }
+
+  const commitHash = currentModalCommit ? (currentModalCommit.hash || currentModalCommit.short_hash || "") : "";
+  const commitUrl = currentModalCommit ? (currentModalCommit.commit_url || currentModalCommit.web_commit_url || "") : "";
+  const icCount = currentModalCommit ? (currentModalCommit.ic_count || 1) : 1;
+
+  try {
+    const res = await fetch("/api/redmine/create-ic", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        title: title,
+        description: description,
+        commit_hash: commitHash,
+        commit_url: commitUrl,
+        ic_count: icCount,
+        activity_type: "Desenvolvimento - Criar/Manter tarefa de automação",
+        complexity: "Baixa",
+      }),
+    });
+
+    const data = await res.json();
+
+    if (logsList) logsList.innerHTML = "";
+    if (Array.isArray(data.logs)) {
+      data.logs.forEach((stepMsg) => {
+        appendLog(stepMsg, stepMsg.includes("FALHA") || stepMsg.includes("Erro"));
+      });
+    }
+
+    if (data.success) {
+      if (logsStatus) {
+        logsStatus.className = "badge bg-success";
+        logsStatus.textContent = "Concluído";
+      }
+
+      if (btn) {
+        btn.disabled = false;
+        btn.className = "btn btn-success d-flex align-items-center gap-1";
+        btn.innerHTML = `<i class="bi bi-box-arrow-up-right"></i> Redmine #${data.issue_id}`;
+        btn.onclick = () => window.open(data.issue_url, '_blank');
+      }
+
+      // Also mark Save to DB button as saved
+      const dbBtn = document.getElementById("btnSaveICToDB");
+      if (dbBtn) {
+        dbBtn.className = "btn btn-success d-flex align-items-center gap-1";
+        dbBtn.innerHTML = '<i class="bi bi-check-circle-fill"></i> Salvo no Banco';
+      }
+
+      if (alertEl && alertText) {
+        alertEl.classList.remove("d-none", "alert-danger");
+        alertEl.classList.add("alert-success");
+        alertText.innerHTML = `
+          <span><b>Sucesso!</b> Tarefa <b>#${data.issue_id}</b> criada no Redmine!</span>
+          <a href="${data.issue_url}" target="_blank" class="btn btn-sm btn-outline-success ms-2 py-0 px-2 text-decoration-none">
+            Abrir Tarefa <i class="bi bi-box-arrow-up-right ms-1"></i>
+          </a>
+        `;
+      }
+
+      // Update currentModalCommit and table row
+      if (currentModalCommit) {
+        currentModalCommit.is_saved = true;
+        currentModalCommit.redmine_id = data.issue_id;
+
+        const cell = document.getElementById(`status-cell-${currentModalCommit.hash}`);
+        if (cell) {
+          cell.innerHTML = `
+            <a href="${data.issue_url}" target="_blank" class="badge bg-success text-decoration-none d-inline-flex align-items-center gap-1" title="Abrir tarefa no Redmine">
+              <i class="bi bi-check-circle-fill"></i> #${data.issue_id}
+            </a>
+          `;
+        }
+      }
+    } else {
+      if (logsStatus) {
+        logsStatus.className = "badge bg-danger";
+        logsStatus.textContent = "Erro";
+      }
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-cloud-arrow-up-fill"></i> Tentar Novamente';
+      }
+      if (alertEl && alertText) {
+        alertEl.classList.remove("d-none", "alert-success");
+        alertEl.classList.add("alert-danger");
+        alertText.textContent = `Erro ao criar tarefa no Redmine: ${data.message}`;
+      }
+    }
+  } catch (err) {
+    console.error("Erro na requisição /api/redmine/create-ic:", err);
+    appendLog(`Erro de conexão local: ${err.message}`, true);
+    if (logsStatus) {
+      logsStatus.className = "badge bg-danger";
+      logsStatus.textContent = "Erro de Rede";
+    }
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="bi bi-cloud-arrow-up-fill"></i> Tentar Novamente';
+    }
+    if (alertEl && alertText) {
+      alertEl.classList.remove("d-none", "alert-success");
+      alertEl.classList.add("alert-danger");
+      alertText.textContent = `Erro de comunicação com o servidor: ${err.message}`;
+    }
+  }
+}
+
+
 
 /**
  * Escape string for safe insertion into HTML

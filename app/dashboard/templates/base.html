@@ -157,15 +157,27 @@
           <div id="icFeedbackAlert" class="alert alert-success d-none py-2 px-3 small d-flex align-items-center gap-2">
             <i class="bi bi-check-circle-fill"></i> <span id="icFeedbackText"></span>
           </div>
+
+          <!-- Redmine API Step-by-Step Logs Container -->
+          <div id="icRedmineLogsContainer" class="d-none mt-2 p-2 rounded bg-dark border border-secondary border-opacity-50 small font-monospace" style="max-height: 140px; overflow-y: auto; font-size: 0.75rem;">
+            <div class="text-muted fw-bold mb-1 d-flex align-items-center justify-content-between">
+              <span><i class="bi bi-terminal me-1 text-warning"></i> Log de Execução Redmine API:</span>
+              <span id="icRedmineLogsStatus" class="badge bg-secondary">Aguardando</span>
+            </div>
+            <div id="icRedmineLogsList" class="text-secondary small"></div>
+          </div>
         </div>
         <div class="modal-footer modal-footer-custom d-flex justify-content-between">
           <button type="button" class="btn btn-secondary-custom" data-bs-dismiss="modal">Fechar</button>
-          <div class="d-flex gap-2">
+          <div class="d-flex flex-wrap gap-2">
             <button type="button" class="btn btn-primary-custom d-flex align-items-center gap-1" onclick="copyFullICToRedmine(this)">
-              <i class="bi bi-clipboard-check"></i> Copiar Tudo para Redmine
+              <i class="bi bi-clipboard-check"></i> Copiar Tudo
             </button>
             <button type="button" class="btn btn-outline-success d-flex align-items-center gap-1" id="btnSaveICToDB" onclick="saveICToDatabase(this)">
               <i class="bi bi-database-add"></i> Salvar no Banco
+            </button>
+            <button type="button" class="btn btn-warning text-dark fw-bold d-flex align-items-center gap-1" id="btnCreateICInRedmine" onclick="createICDirectlyInRedmine(this)">
+              <i class="bi bi-cloud-arrow-up-fill"></i> Criar no Redmine
             </button>
           </div>
         </div>

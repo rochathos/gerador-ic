@@ -38,7 +38,10 @@ class Settings(BaseSettings):
     GIT_AUTHOR_EMAIL: Optional[str] = "athosrocha123@gmail.com"
 
     # Redmine Config (Corporate)
-    REDMINE_URL: str = "https://redmine.corporativo.local"
+    REDMINE_URL: str = "https://redmine.tjce.jus.br"
+    REDMINE_API_KEY: Optional[str] = "c6f07a5841a2e9bc4471c62201aa8c749b040a14"
+    REDMINE_PROJECT_ID: int = 52
+    REDMINE_TRACKER_ID: int = 156
     REDMINE_USERNAME: Optional[str] = None
     REDMINE_PASSWORD: Optional[str] = None
 

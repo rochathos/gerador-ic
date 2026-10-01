@@ -17,6 +17,7 @@ from app.models.execution_history import ExecutionHistory
 from app.services.git_service import GitService
 from app.services.catalog_generator_service import CatalogGeneratorService
 from app.services.report_service import ReportService
+from app.services.redmine_service import RedmineService
 
 router = APIRouter()
 
@@ -264,6 +265,92 @@ async def create_single_ic(
         db.rollback()
         logger.error(f"Erro ao salvar IC: {exc}")
         return JSONResponse(status_code=500, content={"success": False, "message": str(exc)})
+
+
+@router.post("/api/redmine/create-ic")
+async def api_create_redmine_ic(
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Create a Catalog Item directly in Redmine via official REST API with step-by-step logging."""
+    try:
+        body = await request.json()
+        title = body.get("title", "").strip()
+        description = body.get("description", "").strip()
+        commit_hash = body.get("commit_hash", "").strip()
+        commit_url = body.get("commit_url", "").strip()
+        ic_count = body.get("ic_count", 1)
+        activity_type = body.get("activity_type", "Desenvolvimento - Criar/Manter tarefa de automação")
+        complexity = body.get("complexity", "Baixa")
+
+        if not title:
+            return JSONResponse(status_code=400, content={"success": False, "message": "Título do IC é obrigatório."})
+
+        logger.info(f"[REDMINE API] Iniciando criação de IC: '{title[:50]}...' (Commit: {commit_hash})")
+
+        success, issue_url, issue_id, step_logs = RedmineService.create_catalog_item_api(
+            title=title,
+            description=description,
+            commit_hash=commit_hash,
+            commit_url=commit_url,
+            ic_count=int(ic_count) if str(ic_count).isdigit() else 1,
+            activity_type=activity_type,
+            complexity=complexity,
+        )
+
+        if success and issue_id:
+            # Persist or update CatalogItem in PostgreSQL
+            item = None
+            if commit_hash:
+                stmt = select(CatalogItem).where(CatalogItem.commit_hash == commit_hash)
+                item = db.execute(stmt).scalar_one_or_none()
+
+            if not item:
+                item = CatalogItem(
+                    title=title,
+                    description=description,
+                    status="criado",
+                    redmine_id=str(issue_id),
+                    commit_hash=commit_hash or None,
+                )
+                db.add(item)
+            else:
+                item.status = "criado"
+                item.redmine_id = str(issue_id)
+                item.title = title
+                item.description = description
+
+            db.commit()
+            db.refresh(item)
+            logger.info(f"[REDMINE API] Item de Catálogo #{item.id} vinculado à tarefa Redmine #{issue_id} com sucesso.")
+
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "success": True,
+                    "issue_id": issue_id,
+                    "issue_url": issue_url,
+                    "message": f"Tarefa #{issue_id} criada com sucesso no Redmine!",
+                    "logs": step_logs,
+                    "catalog_item_id": item.id,
+                },
+            )
+        else:
+            return JSONResponse(
+                status_code=500,
+                content={
+                    "success": False,
+                    "message": "Falha ao criar tarefa no Redmine.",
+                    "logs": step_logs,
+                },
+            )
+    except Exception as exc:
+        logger.error(f"[REDMINE API] Erro inesperado na rota /api/redmine/create-ic: {exc}")
+        return JSONResponse(
+            status_code=500,
+            content={"success": False, "message": str(exc), "logs": [str(exc)]},
+        )
+
 
 
 
