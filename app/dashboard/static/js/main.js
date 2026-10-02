@@ -481,25 +481,69 @@ function openCreateICModal(commitData) {
       const parts = [];
       if (totalAdded > 0) parts.push(`+${totalAdded} adições`);
       if (totalRemoved > 0) parts.push(`-${totalRemoved} remoções`);
+      if (totalModified > 0) parts.push(`~${totalModified} ajustes`);
       if (parts.length > 0) {
         countLabel += ` (${parts.join(", ")})`;
       }
       countText.textContent = countLabel;
 
-      let htmlBadges = "";
-      if (flows && Object.keys(flows).length > 0) {
+      // Combine XML files from commit.files_changed and flows so no edited XML is omitted
+      const flowEntriesMap = new Map();
+
+      if (commit.files_changed && Array.isArray(commit.files_changed)) {
+        commit.files_changed.forEach(f => {
+          const isObj = typeof f === "object";
+          const rawPath = isObj ? (f.path || f.filename) : String(f);
+          const path = decodeGitPath(rawPath);
+          const isXml = isObj ? f.is_xml : path.toLowerCase().endsWith(".xml");
+          if (isXml) {
+            const flowData = findFlowMetricsForFile(path, flows);
+            flowEntriesMap.set(path.replace(/\\/g, "/").toLowerCase(), {
+              path: path,
+              flowData: flowData
+            });
+          }
+        });
+      }
+
+      if (flows && typeof flows === "object") {
         Object.entries(flows).forEach(([flowPath, flowData]) => {
-          const fAdded = flowData.added || {};
-          const fRemoved = flowData.removed || {};
-          const fModified = flowData.modified || {};
-          const fTotalAdded = flowData.total_added || Object.values(fAdded).reduce((a, b) => a + b, 0);
-          const fTotalRemoved = flowData.total_removed || Object.values(fRemoved).reduce((a, b) => a + b, 0);
-          const fTotalModified = flowData.total_modified || Object.values(fModified).reduce((a, b) => a + b, 0);
-          const fTotal = flowData.total_ics || (fTotalAdded + fTotalRemoved);
-          if (fTotal === 0 && fTotalModified === 0) return;
+          const key = flowPath.replace(/\\/g, "/").toLowerCase();
+          const base = key.split("/").pop();
+          let matchedKey = null;
+          for (const existingKey of flowEntriesMap.keys()) {
+            if (existingKey === key || existingKey.split("/").pop() === base) {
+              matchedKey = existingKey;
+              break;
+            }
+          }
+          if (matchedKey) {
+            const item = flowEntriesMap.get(matchedKey);
+            if (!item.flowData) item.flowData = flowData;
+          } else {
+            flowEntriesMap.set(key, {
+              path: flowPath,
+              flowData: flowData
+            });
+          }
+        });
+      }
+
+      let htmlBadges = "";
+      if (flowEntriesMap.size > 0) {
+        flowEntriesMap.forEach(({ path: flowPath, flowData }) => {
+          const fAdded = (flowData && flowData.added) || {};
+          const fRemoved = (flowData && flowData.removed) || {};
+          const fModified = (flowData && flowData.modified) || {};
+          const fTotalAdded = (flowData && flowData.total_added) || Object.values(fAdded).reduce((a, b) => a + b, 0);
+          const fTotalRemoved = (flowData && flowData.total_removed) || Object.values(fRemoved).reduce((a, b) => a + b, 0);
+          const fTotalModified = (flowData && flowData.total_modified) || Object.values(fModified).reduce((a, b) => a + b, 0);
+          const fTotal = (flowData && flowData.total_ics !== undefined) ? flowData.total_ics : (fTotalAdded + fTotalRemoved + fTotalModified);
 
           htmlBadges += `<div class="p-2 mb-2 rounded bg-dark bg-opacity-50 border border-secondary border-opacity-25 w-100">`;
-          htmlBadges += `<div class="fw-semibold text-warning small mb-1 d-flex align-items-center justify-content-between"><span><i class="bi bi-file-earmark-code me-1"></i>Fluxo: <span class="text-light">${flowPath}</span></span><span class="badge bg-warning text-dark fw-bold">${fTotal} ICs</span></div>`;
+          const badgeClass = fTotal > 0 ? "bg-warning text-dark" : "bg-secondary text-light";
+          const badgeText = fTotal > 0 ? `${fTotal} ICs` : "0 ICs (Sem tags de catálogo)";
+          htmlBadges += `<div class="fw-semibold text-warning small mb-1 d-flex align-items-center justify-content-between"><span><i class="bi bi-file-earmark-code me-1"></i>Fluxo: <span class="text-light">${escapeHtml(flowPath)}</span></span><span class="badge ${badgeClass} fw-bold">${badgeText}</span></div>`;
 
           const fAddEntries = Object.entries(fAdded).sort((a, b) => b[1] - a[1]);
           const fRemEntries = Object.entries(fRemoved).sort((a, b) => b[1] - a[1]);
@@ -508,22 +552,24 @@ function openCreateICModal(commitData) {
           const tagBadges = [];
           if (fAddEntries.length > 0) {
             fAddEntries.forEach(([t, c]) => {
-              tagBadges.push(`<span class="badge bg-success bg-opacity-25 text-success border border-success-subtle fw-semibold px-2 py-1" title="Adicionada"><i class="bi bi-plus-lg me-1"></i>&lt;${t}&gt;: ${c}</span>`);
+              tagBadges.push(`<span class="badge bg-success bg-opacity-25 text-success border border-success-subtle fw-semibold px-2 py-1" title="Adicionada"><i class="bi bi-plus-lg me-1"></i>&lt;${escapeHtml(t)}&gt;: ${c}</span>`);
             });
           }
           if (fRemEntries.length > 0) {
             fRemEntries.forEach(([t, c]) => {
-              tagBadges.push(`<span class="badge bg-danger bg-opacity-25 text-danger border border-danger-subtle fw-semibold px-2 py-1" title="Removida"><i class="bi bi-dash-lg me-1"></i>&lt;${t}&gt;: ${c}</span>`);
+              tagBadges.push(`<span class="badge bg-danger bg-opacity-25 text-danger border border-danger-subtle fw-semibold px-2 py-1" title="Removida"><i class="bi bi-dash-lg me-1"></i>&lt;${escapeHtml(t)}&gt;: ${c}</span>`);
             });
           }
           if (fModEntries.length > 0) {
             fModEntries.forEach(([t, c]) => {
-              tagBadges.push(`<span class="badge bg-warning bg-opacity-25 text-warning border border-warning-subtle fw-semibold px-2 py-1" title="Ajustada / Modificada"><i class="bi bi-pencil-fill me-1" style="font-size:0.65rem;"></i>&lt;${t}&gt;: ${c}</span>`);
+              tagBadges.push(`<span class="badge bg-warning bg-opacity-25 text-warning border border-warning-subtle fw-semibold px-2 py-1" title="Ajustada / Modificada"><i class="bi bi-pencil-fill me-1" style="font-size:0.65rem;"></i>&lt;${escapeHtml(t)}&gt;: ${c}</span>`);
             });
           }
 
           if (tagBadges.length > 0) {
             htmlBadges += `<div class="d-flex align-items-center gap-1 flex-wrap">${tagBadges.join(" ")}</div>`;
+          } else if (fTotal === 0) {
+            htmlBadges += `<div class="text-muted small ps-1">Arquivo XML editado sem alteração direta em nós/transições/regras de catálogo.</div>`;
           }
           htmlBadges += `</div>`;
         });
@@ -535,17 +581,17 @@ function openCreateICModal(commitData) {
         const tagBadges = [];
         if (addEntries.length > 0) {
           addEntries.forEach(([t, c]) => {
-            tagBadges.push(`<span class="badge bg-success bg-opacity-25 text-success border border-success-subtle fw-semibold px-2 py-1" title="Adicionada"><i class="bi bi-plus-lg me-1"></i>&lt;${t}&gt;: ${c}</span>`);
+            tagBadges.push(`<span class="badge bg-success bg-opacity-25 text-success border border-success-subtle fw-semibold px-2 py-1" title="Adicionada"><i class="bi bi-plus-lg me-1"></i>&lt;${escapeHtml(t)}&gt;: ${c}</span>`);
           });
         }
         if (remEntries.length > 0) {
           remEntries.forEach(([t, c]) => {
-            tagBadges.push(`<span class="badge bg-danger bg-opacity-25 text-danger border border-danger-subtle fw-semibold px-2 py-1" title="Removida"><i class="bi bi-dash-lg me-1"></i>&lt;${t}&gt;: ${c}</span>`);
+            tagBadges.push(`<span class="badge bg-danger bg-opacity-25 text-danger border border-danger-subtle fw-semibold px-2 py-1" title="Removida"><i class="bi bi-dash-lg me-1"></i>&lt;${escapeHtml(t)}&gt;: ${c}</span>`);
           });
         }
         if (modEntries.length > 0) {
           modEntries.forEach(([t, c]) => {
-            tagBadges.push(`<span class="badge bg-warning bg-opacity-25 text-warning border border-warning-subtle fw-semibold px-2 py-1" title="Ajustada / Modificada"><i class="bi bi-pencil-fill me-1" style="font-size:0.65rem;"></i>&lt;${t}&gt;: ${c}</span>`);
+            tagBadges.push(`<span class="badge bg-warning bg-opacity-25 text-warning border border-warning-subtle fw-semibold px-2 py-1" title="Ajustada / Modificada"><i class="bi bi-pencil-fill me-1" style="font-size:0.65rem;"></i>&lt;${escapeHtml(t)}&gt;: ${c}</span>`);
           });
         }
 
@@ -590,12 +636,12 @@ function openCreateICModal(commitData) {
     if (effectiveTotalICs > 0) {
       lines.push("");
       let countSummary = "";
-      if (totalAdded > 0 && totalRemoved > 0) {
-        countSummary = ` (${totalAdded} adicionadas, ${totalRemoved} removidas)`;
-      } else if (totalAdded > 0) {
-        countSummary = ` (+${totalAdded} adições)`;
-      } else if (totalRemoved > 0) {
-        countSummary = ` (-${totalRemoved} remoções)`;
+      const parts = [];
+      if (totalAdded > 0) parts.push(`+${totalAdded} adições`);
+      if (totalRemoved > 0) parts.push(`-${totalRemoved} remoções`);
+      if (totalModified > 0) parts.push(`~${totalModified} ajustes`);
+      if (parts.length > 0) {
+        countSummary = ` (${parts.join(", ")})`;
       }
       lines.push(`Itens de Catálogo (IC) calculados: ${effectiveTotalICs} IC(s)${countSummary}`);
     }
@@ -624,8 +670,10 @@ function openCreateICModal(commitData) {
             matchedFlows.add(flowData.path || path);
             const fAdded = flowData.added || {};
             const fRemoved = flowData.removed || {};
+            const fModified = flowData.modified || {};
             const fTotalAdded = flowData.total_added || Object.values(fAdded).reduce((a, b) => a + b, 0);
             const fTotalRemoved = flowData.total_removed || Object.values(fRemoved).reduce((a, b) => a + b, 0);
+            const fTotalModified = flowData.total_modified || Object.values(fModified).reduce((a, b) => a + b, 0);
 
             if (Object.keys(fAdded).length > 0) {
               lines.push(`  * Tags Adicionadas (+${fTotalAdded}):`);
@@ -636,6 +684,12 @@ function openCreateICModal(commitData) {
             if (Object.keys(fRemoved).length > 0) {
               lines.push(`  * Tags Removidas (-${fTotalRemoved}):`);
               Object.entries(fRemoved).sort((a, b) => b[1] - a[1]).forEach(([t, c]) => {
+                lines.push(`    * <${t}>: ${c}`);
+              });
+            }
+            if (Object.keys(fModified).length > 0) {
+              lines.push(`  * Tags Modificadas / Ajustadas (~${fTotalModified}):`);
+              Object.entries(fModified).sort((a, b) => b[1] - a[1]).forEach(([t, c]) => {
                 lines.push(`    * <${t}>: ${c}`);
               });
             }
@@ -655,8 +709,10 @@ function openCreateICModal(commitData) {
               lines.push(`- [XML] ${fPath}`);
               const fAdded = fData.added || {};
               const fRemoved = fData.removed || {};
+              const fModified = fData.modified || {};
               const fTotalAdded = fData.total_added || Object.values(fAdded).reduce((a, b) => a + b, 0);
               const fTotalRemoved = fData.total_removed || Object.values(fRemoved).reduce((a, b) => a + b, 0);
+              const fTotalModified = fData.total_modified || Object.values(fModified).reduce((a, b) => a + b, 0);
               if (Object.keys(fAdded).length > 0) {
                 lines.push(`  * Tags Adicionadas (+${fTotalAdded}):`);
                 Object.entries(fAdded).sort((a, b) => b[1] - a[1]).forEach(([t, c]) => {
@@ -666,6 +722,12 @@ function openCreateICModal(commitData) {
               if (Object.keys(fRemoved).length > 0) {
                 lines.push(`  * Tags Removidas (-${fTotalRemoved}):`);
                 Object.entries(fRemoved).sort((a, b) => b[1] - a[1]).forEach(([t, c]) => {
+                  lines.push(`    * <${t}>: ${c}`);
+                });
+              }
+              if (Object.keys(fModified).length > 0) {
+                lines.push(`  * Tags Modificadas / Ajustadas (~${fTotalModified}):`);
+                Object.entries(fModified).sort((a, b) => b[1] - a[1]).forEach(([t, c]) => {
                   lines.push(`    * <${t}>: ${c}`);
                 });
               }
@@ -687,8 +749,10 @@ function openCreateICModal(commitData) {
           lines.push(`- [XML] ${fPath}`);
           const fAdded = fData.added || {};
           const fRemoved = fData.removed || {};
+          const fModified = fData.modified || {};
           const fTotalAdded = fData.total_added || Object.values(fAdded).reduce((a, b) => a + b, 0);
           const fTotalRemoved = fData.total_removed || Object.values(fRemoved).reduce((a, b) => a + b, 0);
+          const fTotalModified = fData.total_modified || Object.values(fModified).reduce((a, b) => a + b, 0);
           if (Object.keys(fAdded).length > 0) {
             lines.push(`  * Tags Adicionadas (+${fTotalAdded}):`);
             Object.entries(fAdded).sort((a, b) => b[1] - a[1]).forEach(([t, c]) => {
@@ -701,12 +765,18 @@ function openCreateICModal(commitData) {
               lines.push(`    * <${t}>: ${c}`);
             });
           }
+          if (Object.keys(fModified).length > 0) {
+            lines.push(`  * Tags Modificadas / Ajustadas (~${fTotalModified}):`);
+            Object.entries(fModified).sort((a, b) => b[1] - a[1]).forEach(([t, c]) => {
+              lines.push(`    * <${t}>: ${c}`);
+            });
+          }
         }
       });
       if (xmlCount > 0) {
         lines.push(`(Total de arquivos XML alterados: ${xmlCount})`);
       }
-    } else if (effectiveTotalICs > 0 && (Object.keys(addedTags).length > 0 || Object.keys(removedTags).length > 0)) {
+    } else if (effectiveTotalICs > 0 && (Object.keys(addedTags).length > 0 || Object.keys(removedTags).length > 0 || Object.keys(modifiedTags).length > 0)) {
       lines.push("");
       lines.push("Tags XML Alteradas:");
       if (Object.keys(addedTags).length > 0) {
@@ -718,6 +788,12 @@ function openCreateICModal(commitData) {
       if (Object.keys(removedTags).length > 0) {
         lines.push(`- Tags Removidas (-${totalRemoved}):`);
         Object.entries(removedTags).sort((a, b) => b[1] - a[1]).forEach(([t, c]) => {
+          lines.push(`  * <${t}>: ${c}`);
+        });
+      }
+      if (Object.keys(modifiedTags).length > 0) {
+        lines.push(`- Tags Modificadas / Ajustadas (~${totalModified}):`);
+        Object.entries(modifiedTags).sort((a, b) => b[1] - a[1]).forEach(([t, c]) => {
           lines.push(`  * <${t}>: ${c}`);
         });
       }

@@ -16,6 +16,7 @@ class GitService:
     """Service to interact with local Git repositories using GitPython."""
 
     IC_NODE_TAGS = {
+        # Nós e estados do fluxo
         "node",
         "task-node",
         "decision",
@@ -23,21 +24,24 @@ class GitService:
         "fork",
         "join",
         "process-state",
+        # Transições e regras
+        "transition",
+        "condition",
+        # Elementos de fluxo, tarefas, raias e ações
+        "action",
+        "task",
+        "variable",
+        "swimlane",
     }
-    IC_TRANSITION_TAGS = {"transition"}
     EXCLUDED_XML_TAGS = {
         "end-state",
         "process-definition",
         "start-state",
         "assignment",
         "controller",
-        "task",
         "script",
         "event",
-        "action",
-        "swimlane",
         "description",
-        "variable",
         "field",
         "property",
         "exception-handler",
@@ -47,6 +51,7 @@ class GitService:
     DIFF_GIT_REGEX = re.compile(r'diff --git (?:\"a/|a/)(.*) (?:\"b/|b/)(.*)')
     NAME_ATTR_REGEX = re.compile(r'name=["\']([^"\']+)["\']')
     TO_ATTR_REGEX = re.compile(r'to=["\']([^"\']+)["\']')
+    EXPR_ATTR_REGEX = re.compile(r'expression=["\']([^"\']*)["\']')
 
     @classmethod
     def analyze_commit_xml_tags(cls, repo: git.Repo, commit_hash: str) -> Dict[str, Any]:
@@ -54,91 +59,86 @@ class GitService:
         flows: Dict[str, Dict[str, Any]] = {}
         current_flow: Optional[str] = None
 
-        flow_del_nodes: List[Tuple[str, str]] = []
-        flow_add_nodes: List[Tuple[str, str]] = []
-        flow_del_trans: List[Tuple[str, str]] = []
-        flow_add_trans: List[Tuple[str, str]] = []
-        in_del_node = False
-        in_add_node = False
+        flow_del_items: List[Tuple[str, str, str, str, str]] = []
+        flow_add_items: List[Tuple[str, str, str, str, str]] = []
 
         def finalize_flow():
-            nonlocal current_flow, flow_del_nodes, flow_add_nodes, flow_del_trans, flow_add_trans
+            nonlocal current_flow, flow_del_items, flow_add_items
             if not current_flow:
                 return
 
-            # Match nodes: if a node was merely renamed or tweaked, it's not a new/deleted IC
-            unmatched_del_nodes: List[Tuple[str, str]] = []
-            matched_nodes: List[Tuple[str, str, str]] = []
-            for dt, dn in flow_del_nodes:
+            unmatched_del: List[Tuple[str, str, str, str, str]] = []
+            matched_items: List[Tuple[str, str]] = []
+
+            # Pass 1: smart match by identifier (name, to, expression) within same tag
+            for dt, dn, dto, dex, da in flow_del_items:
                 matched = False
-                for at, an in list(flow_add_nodes):
+                for at, an, ato, aex, aa in list(flow_add_items):
                     if dt == at:
-                        if dn == an or (dn and an and (dn in an or an in dn)):
-                            matched_nodes.append((dt, dn, an))
-                            flow_add_nodes.remove((at, an))
+                        is_match = False
+                        if dn and an and (dn == an or dn in an or an in dn):
+                            is_match = True
+                        elif dto and ato and dto == ato:
+                            is_match = True
+                        elif dex and aex and (dex == aex or dex in aex or aex in dex):
+                            is_match = True
+
+                        if is_match:
+                            matched_items.append((dt, dn or dto or dex))
+                            flow_add_items.remove((at, an, ato, aex, aa))
                             matched = True
                             break
                 if not matched:
-                    unmatched_del_nodes.append((dt, dn))
+                    unmatched_del.append((dt, dn, dto, dex, da))
 
-            # Match transitions: if a transition points to the same target or has same name, it's a modified adjustment
-            unmatched_del_trans: List[Tuple[str, str]] = []
-            matched_trans: List[Tuple[str, str, str, str]] = []
-            for dto, dna in flow_del_trans:
+            # Pass 2: match remaining deletions and additions of the same tag as adjustments
+            final_unmatched_del: List[Tuple[str, str, str, str, str]] = []
+            for dt, dn, dto, dex, da in unmatched_del:
                 matched = False
-                for ato, ana in list(flow_add_trans):
-                    if (dto and ato and dto == ato) or (dna and ana and dna == ana):
-                        matched_trans.append((dto, dna, ato, ana))
-                        flow_add_trans.remove((ato, ana))
+                for at, an, ato, aex, aa in list(flow_add_items):
+                    if dt == at:
+                        matched_items.append((dt, dn or dto or dex))
+                        flow_add_items.remove((at, an, ato, aex, aa))
                         matched = True
                         break
                 if not matched:
-                    unmatched_del_trans.append((dto, dna))
+                    final_unmatched_del.append((dt, dn, dto, dex, da))
 
             f_added: Dict[str, int] = {}
             f_removed: Dict[str, int] = {}
             f_modified: Dict[str, int] = {}
 
             # Unmatched deletions -> removals
-            for dt, _ in unmatched_del_nodes:
+            for dt, _, _, _, _ in final_unmatched_del:
                 f_removed[dt] = f_removed.get(dt, 0) + 1
-            for _ in unmatched_del_trans:
-                f_removed["transition"] = f_removed.get("transition", 0) + 1
 
             # Unmatched additions -> additions
-            for at, _ in flow_add_nodes:
+            for at, _, _, _, _ in flow_add_items:
                 f_added[at] = f_added.get(at, 0) + 1
-            for _ in flow_add_trans:
-                f_added["transition"] = f_added.get("transition", 0) + 1
 
             # Matched pairs -> modifications (adjustments: 1 addition + 1 deletion = 1 adjustment)
-            for dt, _, _ in matched_nodes:
+            for dt, _ in matched_items:
                 f_modified[dt] = f_modified.get(dt, 0) + 1
-            for _ in matched_trans:
-                f_modified["transition"] = f_modified.get("transition", 0) + 1
 
             f_tot_add = sum(f_added.values())
             f_tot_rem = sum(f_removed.values())
             f_tot_mod = sum(f_modified.values())
             f_tot_ics = f_tot_add + f_tot_rem + f_tot_mod
 
-            if f_tot_ics > 0:
-                flows[current_flow] = {
-                    "flow_name": current_flow.split("/")[-1].split("\\")[-1],
-                    "path": current_flow,
-                    "added": f_added,
-                    "removed": f_removed,
-                    "modified": f_modified,
-                    "total_added": f_tot_add,
-                    "total_removed": f_tot_rem,
-                    "total_modified": f_tot_mod,
-                    "total_ics": f_tot_ics,
-                }
+            flows[current_flow] = {
+                "flow_name": current_flow.split("/")[-1].split("\\")[-1],
+                "path": current_flow,
+                "added": f_added,
+                "removed": f_removed,
+                "modified": f_modified,
+                "total_added": f_tot_add,
+                "total_removed": f_tot_rem,
+                "total_modified": f_tot_mod,
+                "total_ics": f_tot_ics,
+            }
 
-            flow_del_nodes = []
-            flow_add_nodes = []
-            flow_del_trans = []
-            flow_add_trans = []
+            flow_del_items = []
+            flow_add_items = []
 
         try:
             patch_output = repo.git.show(commit_hash, "--pretty=format:", "-p", "-M", "--", "*.xml")
@@ -152,29 +152,17 @@ class GitService:
                             current_flow = cls.decode_git_path(raw_target)
                         else:
                             current_flow = "arquivo.xml"
-                        in_del_node = False
-                        in_add_node = False
                         continue
 
-                    if line.startswith("+++") or line.startswith("---"):
-                        continue
-
-                    if line.startswith("@@"):
-                        in_del_node = False
-                        in_add_node = False
+                    if line.startswith("+++") or line.startswith("---") or line.startswith("@@"):
                         continue
 
                     sign = line[0] if line else ""
                     if sign not in ("+", "-"):
                         continue
 
-                    content = line[1:].strip()
                     m = cls.TAG_REGEX.match(line)
                     if not m:
-                        if sign == "-" and any(f"</{t}>" in content for t in cls.IC_NODE_TAGS):
-                            in_del_node = False
-                        elif sign == "+" and any(f"</{t}>" in content for t in cls.IC_NODE_TAGS):
-                            in_add_node = False
                         continue
 
                     tag = m.group(1).lower()
@@ -183,33 +171,24 @@ class GitService:
                     if tag in cls.EXCLUDED_XML_TAGS:
                         continue
 
+                    if tag not in cls.IC_NODE_TAGS:
+                        continue
+
                     m_name = cls.NAME_ATTR_REGEX.search(attrs)
                     name_val = m_name.group(1) if m_name else ""
                     m_to = cls.TO_ATTR_REGEX.search(attrs)
                     to_val = m_to.group(1) if m_to else ""
+                    m_expr = cls.EXPR_ATTR_REGEX.search(attrs)
+                    expr_val = m_expr.group(1) if m_expr else ""
 
-                    is_self_closing = attrs.strip().endswith("/") or line.strip().endswith("/>")
-
-                    if tag in cls.IC_NODE_TAGS:
-                        if sign == "-":
-                            if not is_self_closing:
-                                in_del_node = True
-                            flow_del_nodes.append((tag, name_val))
-                        else:
-                            if not is_self_closing:
-                                in_add_node = True
-                            flow_add_nodes.append((tag, name_val))
-                    elif tag in cls.IC_TRANSITION_TAGS:
-                        if sign == "-":
-                            if in_del_node:
-                                continue
-                            flow_del_trans.append((to_val, name_val))
-                        else:
-                            if in_add_node:
-                                continue
-                            flow_add_trans.append((to_val, name_val))
+                    if sign == "-":
+                        flow_del_items.append((tag, name_val, to_val, expr_val, attrs))
+                    else:
+                        flow_add_items.append((tag, name_val, to_val, expr_val, attrs))
 
             finalize_flow()
+        except Exception as exc:
+            logger.debug(f"Erro ao extrair diff de tags XML para o commit {commit_hash[:7]}: {exc}")
         except Exception as exc:
             logger.debug(f"Erro ao extrair diff de tags XML para o commit {commit_hash[:7]}: {exc}")
 

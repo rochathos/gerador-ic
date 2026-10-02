@@ -111,17 +111,19 @@ def test_xml_files_metrics(db_session):
 
 
 def test_xml_tags_ic_counting():
-    """Test XML tag counting rule matching icf.sh (filtering excluded tags)."""
-    # Test exclusion set from icf.sh (with condition removed so it counts as IC)
+    """Test XML tag counting rules: IC tags include nodes, transitions, condition, task, action, swimlane, variable."""
     assert "process-definition" in GitService.EXCLUDED_XML_TAGS
     assert "start-state" in GitService.EXCLUDED_XML_TAGS
     assert "end-state" in GitService.EXCLUDED_XML_TAGS
-    assert "condition" not in GitService.EXCLUDED_XML_TAGS
     assert "assignment" in GitService.EXCLUDED_XML_TAGS
     assert "controller" in GitService.EXCLUDED_XML_TAGS
-    assert "task" in GitService.EXCLUDED_XML_TAGS
     assert "script" in GitService.EXCLUDED_XML_TAGS
     assert "event" in GitService.EXCLUDED_XML_TAGS
+
+    # Must NOT be in excluded: transition, condition, task, action, swimlane, variable
+    for tag in ("transition", "condition", "task", "action", "swimlane", "variable"):
+        assert tag not in GitService.EXCLUDED_XML_TAGS
+        assert tag in GitService.IC_NODE_TAGS
 
     # Test regex tag parsing for additions (+)
     line1 = '+   <transition to="fim" name="concluir"/>'
@@ -129,20 +131,20 @@ def test_xml_tags_ic_counting():
     assert m1 is not None
     tag1 = m1.group(1).lower()
     assert tag1 == "transition"
-    assert tag1 not in GitService.EXCLUDED_XML_TAGS
+    assert tag1 in GitService.IC_NODE_TAGS
 
     line2 = '+   <task name="tarefa_teste"/>'
     m2 = GitService.TAG_REGEX.search(line2)
     assert m2 is not None
     tag2 = m2.group(1).lower()
-    assert tag2 in GitService.EXCLUDED_XML_TAGS
+    assert tag2 in GitService.IC_NODE_TAGS
 
-    # Test condition tag is counted when added or removed
     line_cond = '+   <condition expression="#{parametroUtil.getParametro(...)}"/>'
     m_cond = GitService.TAG_REGEX.search(line_cond)
     assert m_cond is not None
     assert m_cond.group(1).lower() == "condition"
-    assert m_cond.group(1).lower() not in GitService.EXCLUDED_XML_TAGS
+    assert m_cond.group(1).lower() in GitService.IC_NODE_TAGS
+
 
     # Test regex tag parsing for removals (-)
     line3 = '-   <decision name="Decisao Antiga">'
@@ -395,4 +397,120 @@ def test_build_ic_description_with_modified_tags():
     assert "    * <decision>: 1" in desc
     assert "    * <task-node>: 1" in desc
     assert "    * <transition>: 1" in desc
+
+
+def test_build_ic_description_multi_flow_with_condition():
+    """Test IC description generation with multiple XML flows and condition adjustment (Soluções 1 e 2)."""
+    from app.models.commit import build_ic_description
+
+    files_changed = [
+        {"path": "Fluxos/1o Grau/Criminal/Análise de Secretaria - Crimes Tráfico de Drogas.xml", "insertions": 15, "deletions": 2, "is_xml": True},
+        {"path": "Fluxos/1o Grau/Criminal/Análise de Secretaria - Júri Organizações Criminosas.xml", "insertions": 20, "deletions": 7, "is_xml": True},
+        {"path": "Fluxos/1o Grau/Criminal/Análise de Secretaria - VDOC.xml", "insertions": 1, "deletions": 1, "is_xml": True},
+    ]
+
+    xml_tags_metrics = {
+        "added": {"node": 2, "transition": 2},
+        "removed": {},
+        "modified": {"transition": 9, "condition": 1},
+        "total_added": 4,
+        "total_removed": 0,
+        "total_modified": 10,
+        "total_ics": 14,
+        "flows": {
+            "Fluxos/1o Grau/Criminal/Análise de Secretaria - Crimes Tráfico de Drogas.xml": {
+                "flow_name": "Análise de Secretaria - Crimes Tráfico de Drogas.xml",
+                "path": "Fluxos/1o Grau/Criminal/Análise de Secretaria - Crimes Tráfico de Drogas.xml",
+                "added": {"node": 1, "transition": 1},
+                "removed": {},
+                "modified": {"transition": 2},
+                "total_added": 2,
+                "total_removed": 0,
+                "total_modified": 2,
+                "total_ics": 4,
+            },
+            "Fluxos/1o Grau/Criminal/Análise de Secretaria - Júri Organizações Criminosas.xml": {
+                "flow_name": "Análise de Secretaria - Júri Organizações Criminosas.xml",
+                "path": "Fluxos/1o Grau/Criminal/Análise de Secretaria - Júri Organizações Criminosas.xml",
+                "added": {"node": 1, "transition": 1},
+                "removed": {},
+                "modified": {"transition": 7},
+                "total_added": 2,
+                "total_removed": 0,
+                "total_modified": 7,
+                "total_ics": 9,
+            },
+            "Fluxos/1o Grau/Criminal/Análise de Secretaria - VDOC.xml": {
+                "flow_name": "Análise de Secretaria - VDOC.xml",
+                "path": "Fluxos/1o Grau/Criminal/Análise de Secretaria - VDOC.xml",
+                "added": {},
+                "removed": {},
+                "modified": {"condition": 1},
+                "total_added": 0,
+                "total_removed": 0,
+                "total_modified": 1,
+                "total_ics": 1,
+            },
+        },
+    }
+
+    desc = build_ic_description(
+        short_hash="5de7896",
+        commit_date=None,
+        author="athos.rocha",
+        message="#291317 - Adição das outras transições faltantes",
+        commit_url="https://git.tjce.jus.br/sistemas/PJE/-/commit/5de7896",
+        files_changed=files_changed,
+        xml_tags_metrics=xml_tags_metrics,
+        ic_count=14,
+    )
+
+    assert "Commit: 5de7896" in desc
+    assert "Itens de Catálogo (IC) calculados: 14 IC(s) (+4 adições, ~10 ajustes)" in desc
+    assert "- [XML] Fluxos/1o Grau/Criminal/Análise de Secretaria - Crimes Tráfico de Drogas.xml (+15 / -2)" in desc
+    assert "- [XML] Fluxos/1o Grau/Criminal/Análise de Secretaria - Júri Organizações Criminosas.xml (+20 / -7)" in desc
+    assert "- [XML] Fluxos/1o Grau/Criminal/Análise de Secretaria - VDOC.xml (+1 / -1)" in desc
+    assert "<condition>: 1" in desc
+    assert "(Total de arquivos XML alterados: 3)" in desc
+
+
+def test_analyze_commit_xml_tags_new_rules():
+    """Test that IC_NODE_TAGS treats transition, condition, variable, swimlane, action, and task as ICs and adjustments."""
+    from unittest.mock import MagicMock
+
+    fake_patch = """diff --git "a/Fluxos/fluxo1.xml" "b/Fluxos/fluxo1.xml"
+--- a/Fluxos/fluxo1.xml
++++ b/Fluxos/fluxo1.xml
+@@ -10,6 +10,8 @@
+-    <swimlane name="Atendente Antigo"/>
++    <swimlane name="Atendente Novo"/>
+-    <task name="Analisar Autos Antigo"/>
++    <task name="Analisar Autos Novo"/>
+-    <transition to="Destino A" name="Enviar"/>
++    <transition to="Destino A" name="Enviar Ajustado"/>
++    <transition to="Destino B" name="Nova Transicao"/>
+-    <condition expression="#{antigo}"/>
++    <condition expression="#{novo}"/>
+-    <action expression="#{oldAction()}"/>
++    <action expression="#{newAction()}"/>
+-    <variable name="varOld"/>
++    <variable name="varNew"/>
+"""
+    repo = MagicMock()
+    repo.git.show.return_value = fake_patch
+
+    result = GitService.analyze_commit_xml_tags(repo, "abc1234567890")
+    assert result["total_added"] == 1  # Nova Transicao
+    assert result["total_removed"] == 0
+    assert result["total_modified"] == 6  # swimlane, task, transition, condition, action, variable
+    assert result["total_ics"] == 7
+    assert result["modified"]["swimlane"] == 1
+    assert result["modified"]["task"] == 1
+    assert result["modified"]["transition"] == 1
+    assert result["modified"]["condition"] == 1
+    assert result["modified"]["action"] == 1
+    assert result["modified"]["variable"] == 1
+    assert result["added"]["transition"] == 1
+
+
 
