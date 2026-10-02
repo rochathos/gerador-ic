@@ -323,3 +323,172 @@ body {
   border-top: 1px solid var(--border-color);
   padding: 1.25rem 1.5rem;
 }
+
+/* Branch Autocomplete Component (Compact & Floating with Custom Scroll) */
+.branch-autocomplete-wrapper {
+  position: relative;
+  width: 100%;
+}
+
+.branch-autocomplete-wrapper .input-group {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  border-radius: var(--radius-sm);
+}
+
+.branch-autocomplete-wrapper .branch-autocomplete-input {
+  font-family: 'JetBrains Mono', 'Plus Jakarta Sans', monospace;
+  font-size: 0.82rem;
+  letter-spacing: -0.2px;
+  padding: 0.45rem 0.75rem;
+}
+
+.branch-autocomplete-wrapper .branch-autocomplete-input:focus {
+  z-index: 3;
+}
+
+.branch-autocomplete-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 100%;
+  width: max-content;
+  max-width: min(520px, 92vw);
+  z-index: 9999;
+  background: #090e1a;
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(99, 102, 241, 0.45);
+  border-radius: 8px;
+  box-shadow: 0 20px 40px -4px rgba(0, 0, 0, 0.95), 0 0 16px rgba(99, 102, 241, 0.25);
+  overflow: hidden;
+  animation: branchDropdownFade 0.12s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes branchDropdownFade {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.branch-dropdown-header {
+  background: rgba(15, 23, 42, 0.85);
+  font-size: 0.75rem;
+  padding: 0.35rem 0.65rem;
+}
+
+.branch-filter-tabs .branch-tab {
+  font-size: 0.7rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
+  color: var(--text-muted);
+  border: 1px solid transparent;
+  background: transparent;
+  line-height: 1.2;
+}
+
+.branch-filter-tabs .branch-tab:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.branch-filter-tabs .branch-tab.active {
+  color: #c7d2fe;
+  background: rgba(99, 102, 241, 0.3);
+  border-color: rgba(99, 102, 241, 0.5);
+  font-weight: 600;
+}
+
+.branch-dropdown-list {
+  max-height: 200px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+}
+
+/* Custom Scrollbar for Branch List */
+.branch-dropdown-list::-webkit-scrollbar {
+  width: 6px;
+}
+.branch-dropdown-list::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.6);
+}
+.branch-dropdown-list::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 3px;
+}
+.branch-dropdown-list::-webkit-scrollbar-thumb:hover {
+  background: #6366f1;
+}
+
+.branch-dropdown-item {
+  padding: 0.32rem 0.65rem;
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  cursor: pointer;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+  transition: all 0.1s ease;
+  font-size: 0.78rem;
+  color: var(--text-main);
+  user-select: none;
+}
+
+.branch-dropdown-item:hover,
+.branch-dropdown-item.active {
+  background: rgba(99, 102, 241, 0.25);
+  color: #ffffff;
+}
+
+.branch-dropdown-item.is-selected {
+  background: rgba(99, 102, 241, 0.35);
+  border-left: 3px solid var(--primary);
+  font-weight: 600;
+}
+
+.branch-name-text {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.77rem;
+  word-break: break-all;
+}
+
+.branch-highlight {
+  background: rgba(245, 158, 11, 0.4);
+  color: #fef08a;
+  padding: 0 0.18rem;
+  border-radius: 2px;
+  font-weight: 700;
+}
+
+.branch-badge-pill {
+  font-size: 0.68rem;
+  padding: 0.12rem 0.38rem;
+  border-radius: 4px;
+}
+
+.branch-dropdown-empty {
+  padding: 1.25rem 1rem;
+  text-align: center;
+  color: var(--text-dim);
+  font-size: 0.78rem;
+}
+
+.branch-dropdown-footer {
+  background: rgba(15, 23, 42, 0.9);
+  padding: 0.25rem 0.65rem;
+}
+
+.branch-dropdown-footer kbd {
+  font-size: 0.65rem;
+  background: rgba(255, 255, 255, 0.1);
+  color: #cbd5e1;
+  padding: 0.1rem 0.3rem;
+  border-radius: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}

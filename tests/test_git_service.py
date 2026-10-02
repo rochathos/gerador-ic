@@ -88,7 +88,7 @@ def test_execute_analysis_and_persistence(db_session):
 def test_xml_files_metrics(db_session):
     """Test detection and counting of XML file edits and line modifications."""
     now = datetime.now(timezone.utc)
-    start_date = now - timedelta(days=1)
+    start_date = now - timedelta(days=7)
     end_date = now + timedelta(days=1)
 
     history, saved_commits = GitService.execute_analysis(
@@ -175,7 +175,7 @@ def test_xml_tags_ic_counting():
 
     lines = format_ic_details(normalized, 4)
     text = "\n".join(lines)
-    assert "Itens de Catálogo (IC) calculados: 4 IC(s) (3 adicionadas, 1 removidas)" in text
+    assert "Itens de Catálogo (IC) calculados: 4 IC(s) (+3 adições, -1 remoções)" in text
     assert "Tags Adicionadas (+3)" in text
     assert "<transition>: 2" in text
     assert "Tags Removidas (-1)" in text
@@ -322,7 +322,7 @@ def test_build_ic_description_compact_format():
     )
 
     assert "Commit: 5de7896" in desc
-    assert "Itens de Catálogo (IC) calculados: 6 IC(s) (5 adicionadas, 1 removidas)" in desc
+    assert "Itens de Catálogo (IC) calculados: 6 IC(s) (+5 adições, -1 remoções)" in desc
     assert "Arquivos Alterados:" in desc
     # Checks that tags are placed under the XML file with a line break per tag
     assert "- [XML] Fluxos/1o Grau/Criminal/Análise de Secretaria - Crimes Tráfico de Drogas.xml (+15 / -2)" in desc
@@ -337,3 +337,62 @@ def test_build_ic_description_compact_format():
     assert "(Total de arquivos XML alterados: 2)" in desc
     # Ensure redundant section was removed
     assert "Detalhamento por Fluxo" not in desc
+
+
+def test_build_ic_description_with_modified_tags():
+    """Test build_ic_description with modified tags (paired additions and deletions = adjustments)."""
+    from app.models.commit import build_ic_description
+
+    files_changed = [
+        {
+            "path": "Fluxos/2o Grau/Plantão/Análise de Secretaria - Plantão Criminal 2º Grau.xml",
+            "insertions": 7,
+            "deletions": 17,
+            "is_xml": True,
+        }
+    ]
+
+    xml_tags_metrics = {
+        "added": {},
+        "removed": {"node": 1, "transition": 1},
+        "modified": {"decision": 1, "task-node": 1, "transition": 1},
+        "total_added": 0,
+        "total_removed": 2,
+        "total_modified": 3,
+        "total_ics": 5,
+        "flows": {
+            "Fluxos/2o Grau/Plantão/Análise de Secretaria - Plantão Criminal 2º Grau.xml": {
+                "flow_name": "Análise de Secretaria - Plantão Criminal 2º Grau.xml",
+                "path": "Fluxos/2o Grau/Plantão/Análise de Secretaria - Plantão Criminal 2º Grau.xml",
+                "added": {},
+                "removed": {"node": 1, "transition": 1},
+                "modified": {"decision": 1, "task-node": 1, "transition": 1},
+                "total_added": 0,
+                "total_removed": 2,
+                "total_modified": 3,
+                "total_ics": 5,
+            }
+        },
+    }
+
+    desc = build_ic_description(
+        short_hash="a716bd9",
+        commit_date=None,
+        author="athos.rocha",
+        message="#287725 - Atualização de fluxos",
+        commit_url="https://git.tjce.jus.br/sistemas/PJE/-/commit/a716bd9",
+        files_changed=files_changed,
+        xml_tags_metrics=xml_tags_metrics,
+        ic_count=5,
+    )
+
+    assert "Commit: a716bd9" in desc
+    assert "Itens de Catálogo (IC) calculados: 5 IC(s) (-2 remoções, ~3 ajustes)" in desc
+    assert "  * Tags Removidas (-2):" in desc
+    assert "    * <node>: 1" in desc
+    assert "    * <transition>: 1" in desc
+    assert "  * Tags Modificadas / Ajustadas (~3):" in desc
+    assert "    * <decision>: 1" in desc
+    assert "    * <task-node>: 1" in desc
+    assert "    * <transition>: 1" in desc
+

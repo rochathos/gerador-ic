@@ -38,6 +38,13 @@ def init_db() -> None:
         # Import all models to ensure they are registered with Base.metadata
         import app.models  # noqa: F401
         Base.metadata.create_all(bind=engine)
+        try:
+            from sqlalchemy import text
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE commits ADD COLUMN IF NOT EXISTS branch VARCHAR(255);"))
+                conn.commit()
+        except Exception as col_err:
+            logger.debug(f"Verificação de coluna branch: {col_err}")
         logger.info("Tabelas do PostgreSQL verificadas/criadas com sucesso.")
     except Exception as exc:
         logger.error(f"Erro ao inicializar tabelas no PostgreSQL: {exc}")

@@ -121,14 +121,17 @@
         <div class="modal-body p-4">
           <div class="alert alert-info bg-info bg-opacity-10 border-info border-opacity-25 d-flex align-items-center justify-content-between p-2 mb-3 small">
             <div><i class="bi bi-info-circle me-1 text-info"></i> IC gerado automaticamente a partir do commit selecionado.</div>
-            <span id="icCommitBadge" class="badge-hash"></span>
+            <div class="d-flex align-items-center gap-2">
+              <span id="icBranchBadge" class="badge bg-primary-subtle text-primary border border-primary-subtle font-monospace d-none" style="font-size: 0.75rem;"></span>
+              <span id="icCommitBadge" class="badge-hash"></span>
+            </div>
           </div>
 
           <!-- Detalhamento de ICs conforme regra icf.sh -->
           <div id="icTagsAlert" class="alert alert-warning bg-warning bg-opacity-10 border-warning border-opacity-25 p-3 mb-3 small d-none">
             <div class="fw-bold d-flex align-items-center justify-content-between text-warning mb-1">
               <span><i class="bi bi-tag-fill me-1"></i> <span id="icCountText">0 ICs calculados</span></span>
-              <span class="badge bg-warning text-dark fw-bold">Regra icf.sh (PJE)</span>
+              <span class="badge bg-warning text-dark fw-bold">Regras do Catálogo (PJE)</span>
             </div>
             <div class="text-muted small mb-1" style="font-size:0.75rem;">Detalhamento das tags XML calculadas (Adições / Remoções - excluindo estruturais):</div>
             <div class="text-light small d-flex flex-wrap gap-1" id="icTagsDetail"></div>

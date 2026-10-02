@@ -31,19 +31,22 @@ class Settings(BaseSettings):
     DATABASE_URL: Optional[str] = None
 
     # Git Config
-    DEFAULT_GIT_REPO_PATH: str = "C:/ambiente/Git/PJE"
-    DEFAULT_REPO_PATH: str = "C:/ambiente/Git/PJE"
-    DEFAULT_REPO_NAME: str = "PJE"
-    GIT_AUTHOR_NAME: Optional[str] = None
-    GIT_AUTHOR_EMAIL: Optional[str] = None
+    DEFAULT_GIT_REPO_PATH: str = str(BASE_DIR)
+    DEFAULT_REPO_PATH: Optional[str] = None
+    DEFAULT_REPO_NAME: Optional[str] = "PJE"
+    GIT_AUTHOR_NAME: Optional[str] = "athos.rocha"
+    GIT_AUTHOR_EMAIL: Optional[str] = "athosrocha123@gmail.com"
 
     # Redmine Config (Corporate)
-    REDMINE_URL: str = "https://redmine.tjce.jus.br"
+    REDMINE_URL: str = "https://redmine.corporativo.local"
     REDMINE_API_KEY: Optional[str] = None
-    REDMINE_PROJECT_ID: int = 52
-    REDMINE_TRACKER_ID: int = 156
+    REDMINE_PROJECT_ID: Optional[int] = 52
     REDMINE_USERNAME: Optional[str] = None
     REDMINE_PASSWORD: Optional[str] = None
+
+    def model_post_init(self, __context: object) -> None:
+        if not self.DEFAULT_REPO_PATH:
+            self.DEFAULT_REPO_PATH = self.DEFAULT_GIT_REPO_PATH
 
     # Chrome / Selenium Config
     CHROME_PROFILE_PATH: Optional[str] = None

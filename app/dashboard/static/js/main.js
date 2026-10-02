@@ -7,6 +7,7 @@ document.addEventListener("DOMContentLoaded", () => {
   setupQuickFilters();
   setupClipboardCopy();
   setupSearchForm();
+  setupBranchAutocomplete();
 });
 
 /**
@@ -298,6 +299,7 @@ function viewFiles(commitHash, filesJson) {
         <li class="list-group-item bg-dark bg-opacity-50 rounded-2 border ${isXml ? 'border-warning border-opacity-50' : 'border-secondary border-opacity-25'} p-2 d-flex flex-wrap align-items-center justify-content-between gap-2">
           <div class="d-flex align-items-center gap-2 text-truncate" style="max-width: 65%;">
             ${isXml ? '<span class="badge bg-warning text-dark fw-bold" style="font-size:0.7rem;"><i class="bi bi-filetype-xml"></i> XML</span>' : '<i class="bi bi-file-earmark-code text-info"></i>'}
+            ${isObj && f.is_rename ? `<span class="badge bg-info-subtle text-info border border-info-subtle" style="font-size:0.68rem;" title="Renomeado de: ${escapeHtml(f.old_path || '')}"><i class="bi bi-arrow-repeat me-1"></i>Renomeado</span>` : ''}
             <span class="font-monospace small ${isXml ? 'text-warning fw-semibold' : 'text-light'} text-truncate" title="${filePath}">${filePath}</span>
           </div>
           <div class="d-flex align-items-center gap-1 font-monospace" style="font-size: 0.8rem;">
@@ -429,10 +431,19 @@ function openCreateICModal(commitData) {
     redmineLogsStatus.textContent = "Aguardando";
   }
 
-  // Populate badge
+  // Populate badge & branch
   const shortHash = commit.short_hash || (commit.hash ? commit.hash.substring(0, 7) : "");
   if (badgeEl) {
     badgeEl.textContent = `Commit ${shortHash}`;
+  }
+  const branchBadgeEl = document.getElementById("icBranchBadge");
+  if (branchBadgeEl) {
+    if (commit.branch) {
+      branchBadgeEl.innerHTML = `<i class="bi bi-diagram-2 me-1"></i>${escapeHtml(commit.branch)}`;
+      branchBadgeEl.classList.remove("d-none");
+    } else {
+      branchBadgeEl.classList.add("d-none");
+    }
   }
 
   // Populate IC tags breakdown alert (icf.sh rule)
@@ -443,32 +454,35 @@ function openCreateICModal(commitData) {
   const rawMetrics = commit.xml_tags_metrics || {};
   let addedTags = {};
   let removedTags = {};
+  let modifiedTags = {};
   let totalAdded = 0;
   let totalRemoved = 0;
+  let totalModified = 0;
   const flows = rawMetrics.flows || null;
 
-  if (rawMetrics.added !== undefined || rawMetrics.removed !== undefined) {
+  if (rawMetrics.added !== undefined || rawMetrics.removed !== undefined || rawMetrics.modified !== undefined) {
     addedTags = rawMetrics.added || {};
     removedTags = rawMetrics.removed || {};
+    modifiedTags = rawMetrics.modified || {};
     totalAdded = rawMetrics.total_added !== undefined ? rawMetrics.total_added : Object.values(addedTags).reduce((a, b) => a + b, 0);
     totalRemoved = rawMetrics.total_removed !== undefined ? rawMetrics.total_removed : Object.values(removedTags).reduce((a, b) => a + b, 0);
+    totalModified = rawMetrics.total_modified !== undefined ? rawMetrics.total_modified : Object.values(modifiedTags).reduce((a, b) => a + b, 0);
   } else if (typeof rawMetrics === "object") {
     addedTags = rawMetrics;
     totalAdded = Object.values(addedTags).reduce((a, b) => a + b, 0);
   }
 
-  const effectiveTotalICs = commit.ic_count || (totalAdded + totalRemoved);
+  const effectiveTotalICs = commit.ic_count || (totalAdded + totalRemoved + totalModified);
 
   if (tagsAlert && countText && tagsDetail) {
     if (effectiveTotalICs > 0) {
       tagsAlert.classList.remove("d-none");
       let countLabel = `${effectiveTotalICs} Item(ns) de Catálogo (IC) calculados`;
-      if (totalAdded > 0 && totalRemoved > 0) {
-        countLabel += ` (${totalAdded} adicionadas, ${totalRemoved} removidas)`;
-      } else if (totalAdded > 0) {
-        countLabel += ` (+${totalAdded} adições)`;
-      } else if (totalRemoved > 0) {
-        countLabel += ` (-${totalRemoved} remoções)`;
+      const parts = [];
+      if (totalAdded > 0) parts.push(`+${totalAdded} adições`);
+      if (totalRemoved > 0) parts.push(`-${totalRemoved} remoções`);
+      if (parts.length > 0) {
+        countLabel += ` (${parts.join(", ")})`;
       }
       countText.textContent = countLabel;
 
@@ -477,44 +491,66 @@ function openCreateICModal(commitData) {
         Object.entries(flows).forEach(([flowPath, flowData]) => {
           const fAdded = flowData.added || {};
           const fRemoved = flowData.removed || {};
+          const fModified = flowData.modified || {};
           const fTotalAdded = flowData.total_added || Object.values(fAdded).reduce((a, b) => a + b, 0);
           const fTotalRemoved = flowData.total_removed || Object.values(fRemoved).reduce((a, b) => a + b, 0);
+          const fTotalModified = flowData.total_modified || Object.values(fModified).reduce((a, b) => a + b, 0);
           const fTotal = flowData.total_ics || (fTotalAdded + fTotalRemoved);
-          if (fTotal === 0) return;
+          if (fTotal === 0 && fTotalModified === 0) return;
 
           htmlBadges += `<div class="p-2 mb-2 rounded bg-dark bg-opacity-50 border border-secondary border-opacity-25 w-100">`;
           htmlBadges += `<div class="fw-semibold text-warning small mb-1 d-flex align-items-center justify-content-between"><span><i class="bi bi-file-earmark-code me-1"></i>Fluxo: <span class="text-light">${flowPath}</span></span><span class="badge bg-warning text-dark fw-bold">${fTotal} ICs</span></div>`;
 
           const fAddEntries = Object.entries(fAdded).sort((a, b) => b[1] - a[1]);
           const fRemEntries = Object.entries(fRemoved).sort((a, b) => b[1] - a[1]);
+          const fModEntries = Object.entries(fModified).sort((a, b) => b[1] - a[1]);
 
+          const tagBadges = [];
           if (fAddEntries.length > 0) {
-            htmlBadges += `<div class="d-flex align-items-center gap-1 flex-wrap mb-1"><span class="text-success small fw-bold me-1"><i class="bi bi-plus-circle me-1"></i>Adicionadas (+${fTotalAdded}):</span>`;
-            htmlBadges += fAddEntries.map(([t, c]) => `<span class="badge bg-success bg-opacity-25 text-success border border-success-subtle fw-semibold px-2 py-1">&lt;${t}&gt;: ${c}</span>`).join(" ");
-            htmlBadges += `</div>`;
+            fAddEntries.forEach(([t, c]) => {
+              tagBadges.push(`<span class="badge bg-success bg-opacity-25 text-success border border-success-subtle fw-semibold px-2 py-1" title="Adicionada"><i class="bi bi-plus-lg me-1"></i>&lt;${t}&gt;: ${c}</span>`);
+            });
+          }
+          if (fRemEntries.length > 0) {
+            fRemEntries.forEach(([t, c]) => {
+              tagBadges.push(`<span class="badge bg-danger bg-opacity-25 text-danger border border-danger-subtle fw-semibold px-2 py-1" title="Removida"><i class="bi bi-dash-lg me-1"></i>&lt;${t}&gt;: ${c}</span>`);
+            });
+          }
+          if (fModEntries.length > 0) {
+            fModEntries.forEach(([t, c]) => {
+              tagBadges.push(`<span class="badge bg-warning bg-opacity-25 text-warning border border-warning-subtle fw-semibold px-2 py-1" title="Ajustada / Modificada"><i class="bi bi-pencil-fill me-1" style="font-size:0.65rem;"></i>&lt;${t}&gt;: ${c}</span>`);
+            });
           }
 
-          if (fRemEntries.length > 0) {
-            htmlBadges += `<div class="d-flex align-items-center gap-1 flex-wrap"><span class="text-danger small fw-bold me-1"><i class="bi bi-dash-circle me-1"></i>Removidas (-${fTotalRemoved}):</span>`;
-            htmlBadges += fRemEntries.map(([t, c]) => `<span class="badge bg-danger bg-opacity-25 text-danger border border-danger-subtle fw-semibold px-2 py-1">&lt;${t}&gt;: ${c}</span>`).join(" ");
-            htmlBadges += `</div>`;
+          if (tagBadges.length > 0) {
+            htmlBadges += `<div class="d-flex align-items-center gap-1 flex-wrap">${tagBadges.join(" ")}</div>`;
           }
           htmlBadges += `</div>`;
         });
       } else {
         const addEntries = Object.entries(addedTags).sort((a, b) => b[1] - a[1]);
         const remEntries = Object.entries(removedTags).sort((a, b) => b[1] - a[1]);
+        const modEntries = Object.entries(modifiedTags).sort((a, b) => b[1] - a[1]);
 
+        const tagBadges = [];
         if (addEntries.length > 0) {
-          htmlBadges += `<div class="d-flex align-items-center gap-1 flex-wrap mb-1"><span class="text-success small fw-bold me-1"><i class="bi bi-plus-circle me-1"></i>Adicionadas (+${totalAdded}):</span>`;
-          htmlBadges += addEntries.map(([t, c]) => `<span class="badge bg-success bg-opacity-25 text-success border border-success-subtle fw-semibold px-2 py-1">&lt;${t}&gt;: ${c}</span>`).join(" ");
-          htmlBadges += `</div>`;
+          addEntries.forEach(([t, c]) => {
+            tagBadges.push(`<span class="badge bg-success bg-opacity-25 text-success border border-success-subtle fw-semibold px-2 py-1" title="Adicionada"><i class="bi bi-plus-lg me-1"></i>&lt;${t}&gt;: ${c}</span>`);
+          });
+        }
+        if (remEntries.length > 0) {
+          remEntries.forEach(([t, c]) => {
+            tagBadges.push(`<span class="badge bg-danger bg-opacity-25 text-danger border border-danger-subtle fw-semibold px-2 py-1" title="Removida"><i class="bi bi-dash-lg me-1"></i>&lt;${t}&gt;: ${c}</span>`);
+          });
+        }
+        if (modEntries.length > 0) {
+          modEntries.forEach(([t, c]) => {
+            tagBadges.push(`<span class="badge bg-warning bg-opacity-25 text-warning border border-warning-subtle fw-semibold px-2 py-1" title="Ajustada / Modificada"><i class="bi bi-pencil-fill me-1" style="font-size:0.65rem;"></i>&lt;${t}&gt;: ${c}</span>`);
+          });
         }
 
-        if (remEntries.length > 0) {
-          htmlBadges += `<div class="d-flex align-items-center gap-1 flex-wrap"><span class="text-danger small fw-bold me-1"><i class="bi bi-dash-circle me-1"></i>Removidas (-${totalRemoved}):</span>`;
-          htmlBadges += remEntries.map(([t, c]) => `<span class="badge bg-danger bg-opacity-25 text-danger border border-danger-subtle fw-semibold px-2 py-1">&lt;${t}&gt;: ${c}</span>`).join(" ");
-          htmlBadges += `</div>`;
+        if (tagBadges.length > 0) {
+          htmlBadges = `<div class="d-flex align-items-center gap-1 flex-wrap">${tagBadges.join(" ")}</div>`;
         }
       }
 
@@ -1162,9 +1198,16 @@ async function loadMoreCommits() {
           <td class="text-muted small">${c.commit_date || ""}</td>
           <td><div class="fw-medium text-light small">${escapeHtml(c.author || "")}</div></td>
           <td>
-            <span class="badge bg-dark border border-secondary text-info small">
+            <span class="badge bg-dark border border-secondary text-info small text-truncate d-inline-block" style="max-width: 120px;" title="Repositório: ${escapeHtml(c.repo_name || "Local")}">
               <i class="bi bi-folder2 me-1"></i>${escapeHtml(c.repo_name || "Local")}
             </span>
+          </td>
+          <td>
+            ${c.branch ? `
+              <span class="badge bg-primary-subtle text-primary border border-primary-subtle small text-truncate d-inline-block" style="max-width: 140px; font-family: 'JetBrains Mono', monospace; font-size: 0.72rem;" title="Branch de Origem: ${escapeHtml(c.branch)}">
+                <i class="bi bi-diagram-2 me-1"></i>${escapeHtml(c.branch)}
+              </span>
+            ` : `<span class="text-muted small">-</span>`}
           </td>
           <td><div class="text-light">${escapeHtml(c.message || "")}</div></td>
           <td class="text-center">
@@ -1212,4 +1255,411 @@ async function loadMoreCommits() {
     btn.disabled = false;
     if (spinner) spinner.classList.add("d-none");
   }
+}
+
+/**
+ * Safe HTML escaping helper
+ */
+function escapeHtml(text) {
+  if (!text) return "";
+  return String(text)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+/**
+ * Interactive Branch Autocomplete Component
+ * Provides real-time filtering, keyboard navigation, and clear actions
+ * across all local and remote branches.
+ */
+function setupBranchAutocomplete() {
+  const wrappers = document.querySelectorAll(".branch-autocomplete-wrapper");
+  if (!wrappers.length) return;
+
+  // 1. Try to load initial branch data from embedded JSON
+  let branchesData = { active: "", local: [], remote: [], selected: "" };
+  const dataScript = document.getElementById("branches-data");
+  if (dataScript) {
+    try {
+      branchesData = JSON.parse(dataScript.textContent);
+    } catch (e) {
+      console.warn("Erro ao fazer parse de branches-data:", e);
+    }
+  }
+
+  function buildBranchList(data) {
+    const list = [];
+    // Special option: All branches
+    list.push({
+      value: "",
+      name: "Todas as Branches (--all)",
+      type: "all",
+      badge: "Todas",
+      badgeClass: "bg-secondary text-light",
+      icon: "bi-diagram-3",
+    });
+
+    // Active branch (if any)
+    if (data.active) {
+      list.push({
+        value: data.active,
+        name: data.active,
+        type: "active",
+        badge: "⭐ Atual",
+        badgeClass: "bg-warning text-dark fw-bold",
+        icon: "bi-star-fill text-warning",
+      });
+    }
+
+    // Local branches
+    if (Array.isArray(data.local)) {
+      data.local.forEach((b) => {
+        if (b && b !== data.active) {
+          list.push({
+            value: b,
+            name: b,
+            type: "local",
+            badge: "Local",
+            badgeClass: "bg-primary-subtle text-primary border border-primary-subtle",
+            icon: "bi-hdd-network",
+          });
+        }
+      });
+    }
+
+    // Remote branches
+    if (Array.isArray(data.remote)) {
+      data.remote.forEach((b) => {
+        if (b) {
+          list.push({
+            value: b,
+            name: b,
+            type: "remote",
+            badge: "origin",
+            badgeClass: "bg-secondary-subtle text-muted",
+            icon: "bi-cloud",
+          });
+        }
+      });
+    }
+
+    return list;
+  }
+
+  let allBranchItems = buildBranchList(branchesData);
+
+  // If no branch data embedded, fetch from API asynchronously
+  if (allBranchItems.length <= 1) {
+    fetch("/api/git/branches")
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success) {
+          branchesData.active = data.active;
+          branchesData.local = data.local;
+          branchesData.remote = data.remote;
+          allBranchItems = buildBranchList(branchesData);
+          wrappers.forEach((w) => updatePlaceholderAndState(w));
+        }
+      })
+      .catch((err) => console.warn("Falha ao buscar branches da API:", err));
+  }
+
+  function updatePlaceholderAndState(wrapper) {
+    const textInput = wrapper.querySelector(".branch-autocomplete-input");
+    const hiddenInput = wrapper.querySelector("input[name='branch']");
+    const clearBtn = wrapper.querySelector(".branch-autocomplete-clear");
+    if (!textInput || !hiddenInput) return;
+
+    if (hiddenInput.value) {
+      textInput.value = hiddenInput.value;
+      if (clearBtn) clearBtn.style.display = "inline-flex";
+    } else {
+      if (clearBtn) clearBtn.style.display = "none";
+    }
+  }
+
+  wrappers.forEach((wrapper) => {
+    const hiddenInput = wrapper.querySelector("input[name='branch']");
+    const textInput = wrapper.querySelector(".branch-autocomplete-input");
+    const clearBtn = wrapper.querySelector(".branch-autocomplete-clear");
+    const toggleBtn = wrapper.querySelector(".branch-autocomplete-toggle");
+    const dropdownMenu = wrapper.querySelector(".branch-autocomplete-dropdown");
+    const dropdownList = wrapper.querySelector(".branch-dropdown-list");
+    const countEl = wrapper.querySelector(".branch-results-count");
+    const tabBtns = wrapper.querySelectorAll(".branch-tab");
+
+    if (!hiddenInput || !textInput || !dropdownMenu || !dropdownList) return;
+
+    let activeIndex = -1;
+    let currentTab = "all";
+
+    function updateTabCounts() {
+      const allTab = wrapper.querySelector(".branch-tab[data-tab='all']");
+      const localTab = wrapper.querySelector(".branch-tab[data-tab='local']");
+      const remoteTab = wrapper.querySelector(".branch-tab[data-tab='remote']");
+      const localCount = allBranchItems.filter((i) => i.type === "local" || i.type === "active").length;
+      const remoteCount = allBranchItems.filter((i) => i.type === "remote").length;
+      if (allTab) allTab.textContent = `Todas (${Math.max(0, allBranchItems.length - 1)})`;
+      if (localTab) localTab.textContent = `Locais (${localCount})`;
+      if (remoteTab) remoteTab.textContent = `Remotas (${remoteCount})`;
+    }
+    updateTabCounts();
+
+    tabBtns.forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        currentTab = btn.dataset.tab || "all";
+        tabBtns.forEach((b) => b.classList.remove("active"));
+        btn.classList.add("active");
+        filterAndRender();
+        textInput.focus();
+      });
+    });
+
+    function renderDropdown(items, query) {
+      dropdownList.innerHTML = "";
+      activeIndex = -1;
+
+      if (countEl) {
+        if (query) {
+          countEl.textContent = `${items.length} encontrada(s)`;
+        } else {
+          countEl.textContent = `${items.length} itens`;
+        }
+      }
+
+      if (!items.length) {
+        const emptyDiv = document.createElement("div");
+        emptyDiv.className = "branch-dropdown-empty";
+        emptyDiv.innerHTML = `<i class="bi bi-search me-1 text-dim"></i> Nenhuma branch encontrada para "<strong>${escapeHtml(query)}</strong>"`;
+        dropdownList.appendChild(emptyDiv);
+        dropdownMenu.style.display = "block";
+        return;
+      }
+
+      // Max items to render in DOM for high performance
+      const maxToRender = 60;
+      const slice = items.slice(0, maxToRender);
+
+      slice.forEach((item, index) => {
+        const itemEl = document.createElement("div");
+        itemEl.className = "branch-dropdown-item";
+        itemEl.dataset.value = item.value;
+        itemEl.dataset.index = index;
+
+        const isSelected = (hiddenInput.value || "") === item.value;
+        if (isSelected) {
+          itemEl.classList.add("is-selected");
+        }
+
+        // Highlight matching text in name
+        let nameHtml = escapeHtml(item.name);
+        if (query && item.name.toLowerCase().includes(query.toLowerCase())) {
+          const qEsc = escapeHtml(query);
+          const regex = new RegExp(`(${qEsc.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`, "gi");
+          nameHtml = nameHtml.replace(regex, '<mark class="branch-highlight">$1</mark>');
+        }
+
+        itemEl.innerHTML = `
+          <div class="d-flex align-items-center gap-2 text-truncate" style="max-width: 78%;">
+            <i class="bi ${item.icon} text-muted flex-shrink-0" style="font-size: 0.75rem;"></i>
+            <span class="branch-name-text text-truncate" title="${escapeHtml(item.name)}">${nameHtml}</span>
+          </div>
+          <div class="d-flex align-items-center gap-1 flex-shrink-0">
+            <span class="badge ${item.badgeClass} branch-badge-pill">${item.badge}</span>
+            ${isSelected ? '<i class="bi bi-check2 text-primary ms-1" style="font-size: 0.85rem;"></i>' : ''}
+          </div>
+        `;
+
+        itemEl.addEventListener("mousedown", (e) => {
+          e.preventDefault(); // prevent input blur
+          selectItem(item.value, item.value ? item.name : "");
+        });
+
+        itemEl.addEventListener("mouseenter", () => {
+          setActiveIndex(index);
+        });
+
+        dropdownList.appendChild(itemEl);
+      });
+
+      if (items.length > maxToRender) {
+        const moreDiv = document.createElement("div");
+        moreDiv.className = "p-2 text-center text-dim small border-top border-secondary border-opacity-25";
+        moreDiv.style.fontSize = "0.72rem";
+        moreDiv.textContent = `Mostrando 60 de ${items.length} branches. Continue digitando para filtrar...`;
+        dropdownList.appendChild(moreDiv);
+      }
+
+      dropdownMenu.style.display = "block";
+    }
+
+    function setActiveIndex(index) {
+      const domItems = dropdownList.querySelectorAll(".branch-dropdown-item");
+      domItems.forEach((el) => el.classList.remove("active"));
+      if (index >= 0 && index < domItems.length) {
+        activeIndex = index;
+        const current = domItems[index];
+        current.classList.add("active");
+        current.scrollIntoView({ block: "nearest" });
+      } else {
+        activeIndex = -1;
+      }
+    }
+
+    function filterAndRender() {
+      const q = textInput.value.trim().toLowerCase();
+
+      // 1. Filter by current tab
+      let tabPool = allBranchItems;
+      if (currentTab === "local") {
+        tabPool = allBranchItems.filter((i) => i.type === "all" || i.type === "active" || i.type === "local");
+      } else if (currentTab === "remote") {
+        tabPool = allBranchItems.filter((i) => i.type === "all" || i.type === "remote");
+      }
+
+      if (!q) {
+        renderDropdown(tabPool, "");
+        return;
+      }
+
+      // 2. Filter by search query
+      const matched = tabPool.filter((item) => {
+        if (item.type === "all") {
+          return q === "todas" || q === "all" || q === "--all";
+        }
+        return item.name.toLowerCase().includes(q);
+      });
+
+      // Sort with smart ranking:
+      // 1. Starts with query
+      // 2. Local before remote
+      matched.sort((a, b) => {
+        if (a.type === "all") return -1;
+        if (b.type === "all") return 1;
+        const aStarts = a.name.toLowerCase().startsWith(q);
+        const bStarts = b.name.toLowerCase().startsWith(q);
+        if (aStarts && !bStarts) return -1;
+        if (!aStarts && bStarts) return 1;
+        if (a.type === "active") return -1;
+        if (b.type === "active") return 1;
+        if (a.type === "local" && b.type === "remote") return -1;
+        if (a.type === "remote" && b.type === "local") return 1;
+        return a.name.localeCompare(b.name);
+      });
+
+      renderDropdown(matched, q);
+    }
+
+    function selectItem(value, displayName) {
+      hiddenInput.value = value;
+      textInput.value = value || "";
+      if (clearBtn) {
+        clearBtn.style.display = value ? "inline-flex" : "none";
+      }
+      closeDropdown();
+      textInput.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+
+    function closeDropdown() {
+      dropdownMenu.style.display = "none";
+      activeIndex = -1;
+    }
+
+    function openDropdown() {
+      filterAndRender();
+    }
+
+    // Input events
+    textInput.addEventListener("focus", () => {
+      openDropdown();
+    });
+
+    textInput.addEventListener("input", () => {
+      hiddenInput.value = textInput.value.trim();
+      if (clearBtn) {
+        clearBtn.style.display = textInput.value ? "inline-flex" : "none";
+      }
+      filterAndRender();
+    });
+
+    textInput.addEventListener("keydown", (e) => {
+      const isOpen = dropdownMenu.style.display === "block";
+      const domItems = dropdownList.querySelectorAll(".branch-dropdown-item");
+
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        if (!isOpen) {
+          openDropdown();
+        } else {
+          let next = activeIndex + 1;
+          if (next >= domItems.length) next = 0;
+          setActiveIndex(next);
+        }
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        if (isOpen) {
+          let prev = activeIndex - 1;
+          if (prev < 0) prev = domItems.length - 1;
+          setActiveIndex(prev);
+        }
+      } else if (e.key === "Enter") {
+        if (isOpen && activeIndex >= 0 && domItems[activeIndex]) {
+          e.preventDefault();
+          const selectedVal = domItems[activeIndex].dataset.value;
+          selectItem(selectedVal, selectedVal);
+        } else if (isOpen) {
+          if (domItems.length === 1) {
+            e.preventDefault();
+            const val = domItems[0].dataset.value;
+            selectItem(val, val);
+          } else {
+            closeDropdown();
+          }
+        }
+      } else if (e.key === "Escape") {
+        if (isOpen) {
+          e.preventDefault();
+          closeDropdown();
+        }
+      } else if (e.key === "Tab") {
+        closeDropdown();
+      }
+    });
+
+    // Clear button
+    if (clearBtn) {
+      clearBtn.addEventListener("click", () => {
+        selectItem("", "");
+        textInput.focus();
+        openDropdown();
+      });
+    }
+
+    // Toggle button
+    if (toggleBtn) {
+      toggleBtn.addEventListener("click", () => {
+        if (dropdownMenu.style.display === "block") {
+          closeDropdown();
+        } else {
+          textInput.focus();
+          openDropdown();
+        }
+      });
+    }
+
+    // Click outside to close
+    document.addEventListener("click", (e) => {
+      if (!wrapper.contains(e.target)) {
+        closeDropdown();
+      }
+    });
+
+    // Initial state
+    updatePlaceholderAndState(wrapper);
+  });
 }

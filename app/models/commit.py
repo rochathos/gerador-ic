@@ -19,28 +19,34 @@ def decode_git_path(path: str) -> str:
 
 
 def normalize_xml_metrics(raw: Any, default_count: int = 0) -> Dict[str, Any]:
-    """Normalize raw xml_tags_metrics into a standard dict containing added/removed, flows, and counts."""
+    """Normalize raw xml_tags_metrics into a standard dict containing added/removed/modified, flows, and counts."""
     if not isinstance(raw, dict):
         return {
             "added": {},
             "removed": {},
+            "modified": {},
             "total_added": 0,
             "total_removed": 0,
+            "total_modified": 0,
             "total_ics": default_count or 0,
             "flows": {},
         }
-    if "added" in raw or "removed" in raw or "flows" in raw:
+    if "added" in raw or "removed" in raw or "modified" in raw or "flows" in raw:
         added = raw.get("added") or {}
         removed = raw.get("removed") or {}
+        modified = raw.get("modified") or {}
         total_added = raw.get("total_added", sum(added.values()))
         total_removed = raw.get("total_removed", sum(removed.values()))
-        total_ics = raw.get("total_ics", total_added + total_removed)
+        total_modified = raw.get("total_modified", sum(modified.values()))
+        total_ics = raw.get("total_ics", total_added + total_removed + total_modified)
         flows = raw.get("flows") or {}
         return {
             "added": added,
             "removed": removed,
+            "modified": modified,
             "total_added": total_added,
             "total_removed": total_removed,
+            "total_modified": total_modified,
             "total_ics": total_ics or default_count or 0,
             "flows": flows,
         }
@@ -49,15 +55,17 @@ def normalize_xml_metrics(raw: Any, default_count: int = 0) -> Dict[str, Any]:
     return {
         "added": raw,
         "removed": {},
+        "modified": {},
         "total_added": total_added,
         "total_removed": 0,
+        "total_modified": 0,
         "total_ics": default_count or total_added,
         "flows": {},
     }
 
 
 def format_ic_details(parsed_metrics: Dict[str, Any], ic_count: int = 0) -> List[str]:
-    """Helper to generate detailed IC calculation lines showing additions and removals per flow (XML file)."""
+    """Helper to generate detailed IC calculation lines showing additions, removals, and modifications per flow (XML file)."""
     total_ics = ic_count or parsed_metrics.get("total_ics", 0)
     if total_ics <= 0:
         return []
@@ -65,15 +73,16 @@ def format_ic_details(parsed_metrics: Dict[str, Any], ic_count: int = 0) -> List
     lines: List[str] = [""]
     added_cnt = parsed_metrics.get("total_added", 0)
     removed_cnt = parsed_metrics.get("total_removed", 0)
+    modified_cnt = parsed_metrics.get("total_modified", 0)
 
-    if added_cnt > 0 and removed_cnt > 0:
-        summary_str = f" ({added_cnt} adicionadas, {removed_cnt} removidas)"
-    elif added_cnt > 0:
-        summary_str = f" (+{added_cnt} adições)"
-    elif removed_cnt > 0:
-        summary_str = f" (-{removed_cnt} remoções)"
-    else:
-        summary_str = ""
+    parts: List[str] = []
+    if added_cnt > 0:
+        parts.append(f"+{added_cnt} adições")
+    if removed_cnt > 0:
+        parts.append(f"-{removed_cnt} remoções")
+    if modified_cnt > 0:
+        parts.append(f"~{modified_cnt} ajustes")
+    summary_str = f" ({', '.join(parts)})" if parts else ""
 
     lines.append(f"Itens de Catálogo (IC) calculados: {total_ics} IC(s){summary_str}")
 
@@ -84,9 +93,11 @@ def format_ic_details(parsed_metrics: Dict[str, Any], ic_count: int = 0) -> List
         for path, flow_data in flows.items():
             f_added = flow_data.get("added", {})
             f_removed = flow_data.get("removed", {})
+            f_modified = flow_data.get("modified", {})
             f_total_added = flow_data.get("total_added", sum(f_added.values()))
             f_total_removed = flow_data.get("total_removed", sum(f_removed.values()))
-            f_total_ics = flow_data.get("total_ics", f_total_added + f_total_removed)
+            f_total_modified = flow_data.get("total_modified", sum(f_modified.values()))
+            f_total_ics = flow_data.get("total_ics", f_total_added + f_total_removed + f_total_modified)
 
             if f_total_ics == 0:
                 continue
@@ -101,10 +112,15 @@ def format_ic_details(parsed_metrics: Dict[str, Any], ic_count: int = 0) -> List
                 lines.append(f"- Tags Removidas (-{f_total_removed}):")
                 for tag, count in sorted(f_removed.items(), key=lambda x: x[1], reverse=True):
                     lines.append(f"  * <{tag}>: {count}")
+            if f_modified:
+                lines.append(f"- Tags Modificadas / Ajustadas (~{f_total_modified}):")
+                for tag, count in sorted(f_modified.items(), key=lambda x: x[1], reverse=True):
+                    lines.append(f"  * <{tag}>: {count}")
     else:
         added_tags = parsed_metrics.get("added", {})
         removed_tags = parsed_metrics.get("removed", {})
-        if added_tags or removed_tags:
+        modified_tags = parsed_metrics.get("modified", {})
+        if added_tags or removed_tags or modified_tags:
             lines.append("Detalhamento das tags XML (regras do PJE):")
             if added_tags:
                 lines.append(f"- Tags Adicionadas (+{added_cnt}):")
@@ -113,6 +129,10 @@ def format_ic_details(parsed_metrics: Dict[str, Any], ic_count: int = 0) -> List
             if removed_tags:
                 lines.append(f"- Tags Removidas (-{removed_cnt}):")
                 for tag, count in sorted(removed_tags.items(), key=lambda x: x[1], reverse=True):
+                    lines.append(f"  * <{tag}>: {count}")
+            if modified_tags:
+                lines.append(f"- Tags Modificadas / Ajustadas (~{modified_cnt}):")
+                for tag, count in sorted(modified_tags.items(), key=lambda x: x[1], reverse=True):
                     lines.append(f"  * <{tag}>: {count}")
 
     return lines
@@ -140,8 +160,10 @@ def format_flow_tags_lines(flow_data: Dict[str, Any]) -> List[str]:
     lines: List[str] = []
     f_added = flow_data.get("added", {})
     f_removed = flow_data.get("removed", {})
+    f_modified = flow_data.get("modified", {})
     f_total_added = flow_data.get("total_added", sum(f_added.values()))
     f_total_removed = flow_data.get("total_removed", sum(f_removed.values()))
+    f_total_modified = flow_data.get("total_modified", sum(f_modified.values()))
 
     if f_added:
         lines.append(f"  * Tags Adicionadas (+{f_total_added}):")
@@ -150,6 +172,10 @@ def format_flow_tags_lines(flow_data: Dict[str, Any]) -> List[str]:
     if f_removed:
         lines.append(f"  * Tags Removidas (-{f_total_removed}):")
         for tag, count in sorted(f_removed.items(), key=lambda x: x[1], reverse=True):
+            lines.append(f"    * <{tag}>: {count}")
+    if f_modified:
+        lines.append(f"  * Tags Modificadas / Ajustadas (~{f_total_modified}):")
+        for tag, count in sorted(f_modified.items(), key=lambda x: x[1], reverse=True):
             lines.append(f"    * <{tag}>: {count}")
 
     return lines
@@ -195,15 +221,16 @@ def build_ic_description(
 
     added_cnt = parsed_metrics.get("total_added", 0)
     removed_cnt = parsed_metrics.get("total_removed", 0)
+    modified_cnt = parsed_metrics.get("total_modified", 0)
     if total_ics > 0:
-        if added_cnt > 0 and removed_cnt > 0:
-            summary_str = f" ({added_cnt} adicionadas, {removed_cnt} removidas)"
-        elif added_cnt > 0:
-            summary_str = f" (+{added_cnt} adições)"
-        elif removed_cnt > 0:
-            summary_str = f" (-{removed_cnt} remoções)"
-        else:
-            summary_str = ""
+        parts: List[str] = []
+        if added_cnt > 0:
+            parts.append(f"+{added_cnt} adições")
+        if removed_cnt > 0:
+            parts.append(f"-{removed_cnt} remoções")
+        if modified_cnt > 0:
+            parts.append(f"~{modified_cnt} ajustes")
+        summary_str = f" ({', '.join(parts)})" if parts else ""
         lines.append("")
         lines.append(f"Itens de Catálogo (IC) calculados: {total_ics} IC(s){summary_str}")
 
@@ -288,6 +315,7 @@ class Commit(Base):
     commit_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
     files_changed: Mapped[Any] = mapped_column(JSON, nullable=True)  # List of changed file names/stats
     repo_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
+    branch: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
     repo_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     commit_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     xml_tags_metrics: Mapped[Optional[Any]] = mapped_column(JSON, nullable=True)  # Dict of {tag: count}
@@ -423,6 +451,7 @@ class Commit(Base):
             "commit_date": self.commit_date.strftime("%d/%m/%Y %H:%M") if self.commit_date else "",
             "message": self.message,
             "repo_name": self.repo_name or "",
+            "branch": getattr(self, "branch", "") or "",
             "repo_path": self.repo_path or "",
             "commit_url": self.web_commit_url or self.commit_url or "",
             "files_changed": self.files_changed_clean,
@@ -454,6 +483,7 @@ class CommitItem:
         self.message = data.get("message", "")
         self.files_changed = data.get("files_changed", [])
         self.repo_name = data.get("repo_name", "")
+        self.branch = data.get("branch", "")
         self.repo_path = data.get("repo_path", "")
         self.commit_url = data.get("commit_url", "")
         self.xml_tags_metrics = data.get("xml_tags_metrics") or {}
@@ -569,6 +599,7 @@ class CommitItem:
             "commit_date": date_str,
             "message": self.message,
             "repo_name": self.repo_name or "",
+            "branch": getattr(self, "branch", "") or "",
             "repo_path": self.repo_path or "",
             "commit_url": self.web_commit_url or self.commit_url or "",
             "files_changed": self.files_changed_clean,

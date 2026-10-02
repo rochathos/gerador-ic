@@ -45,31 +45,50 @@
         </div>
 
         <div class="col-12 col-md-3">
-          <label class="form-label text-muted small fw-semibold">Branch Git</label>
-          <select name="branch" id="filter_branch" class="form-select form-select-custom">
-            <option value="" {% if not selected_branch %}selected{% endif %}>Todas as Branches (--all)</option>
-            {% if active_branch %}
-            <option value="{{ active_branch }}" {% if selected_branch == active_branch %}selected{% endif %}>
-              ⭐ Atual: {{ active_branch }}
-            </option>
-            {% endif %}
-            {% if local_branches %}
-            <optgroup label="Branches Locais ({{ local_branches|length }})">
-              {% for b in local_branches %}
-                {% if b != active_branch %}
-                <option value="{{ b }}" {% if selected_branch == b %}selected{% endif %}>{{ b }}</option>
-                {% endif %}
-              {% endfor %}
-            </optgroup>
-            {% endif %}
-            {% if remote_branches %}
-            <optgroup label="Branches Remotas / origin ({{ remote_branches|length }})">
-              {% for b in remote_branches %}
-                <option value="{{ b }}" {% if selected_branch == b %}selected{% endif %}>{{ b }}</option>
-              {% endfor %}
-            </optgroup>
-            {% endif %}
-          </select>
+          <label class="form-label text-muted small fw-semibold d-flex justify-content-between align-items-center">
+            <span>Branch Git</span>
+            <span class="text-dim fw-normal small" style="font-size: 0.72rem;">Autocompletar</span>
+          </label>
+          <div class="branch-autocomplete-wrapper">
+            <input type="hidden" name="branch" value="{{ selected_branch or '' }}">
+            <div class="input-group">
+              <span class="input-group-text bg-dark border-secondary text-muted"><i class="bi bi-diagram-2"></i></span>
+              <input type="text"
+                     class="form-control form-control-custom branch-autocomplete-input"
+                     placeholder="Todas (--all) ou buscar..."
+                     value="{{ selected_branch or '' }}"
+                     autocomplete="off"
+                     spellcheck="false">
+              <button type="button"
+                      class="btn btn-dark border-secondary text-muted branch-autocomplete-clear"
+                      title="Limpar seleção de branch"
+                      style="{% if not selected_branch %}display: none;{% endif %}">
+                <i class="bi bi-x-circle"></i>
+              </button>
+              <button type="button"
+                      class="btn btn-dark border-secondary text-muted branch-autocomplete-toggle"
+                      title="Listar branches">
+                <i class="bi bi-chevron-down"></i>
+              </button>
+            </div>
+
+            <!-- Floating dropdown results -->
+            <div class="branch-autocomplete-dropdown" style="display: none;">
+              <div class="branch-dropdown-header d-flex justify-content-between align-items-center">
+                <div class="d-flex gap-1 branch-filter-tabs">
+                  <button type="button" class="branch-tab active" data-tab="all">Todas</button>
+                  <button type="button" class="branch-tab" data-tab="local">Locais</button>
+                  <button type="button" class="branch-tab" data-tab="remote">Remotas</button>
+                </div>
+                <span class="text-dim branch-results-count"></span>
+              </div>
+              <div class="branch-dropdown-list"></div>
+              <div class="branch-dropdown-footer d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-arrows-vertical me-1"></i>Navegar &bull; <kbd>Enter</kbd> Selecionar</span>
+                <span><kbd>ESC</kbd> Fechar</span>
+              </div>
+            </div>
+          </div>
         </div>
 
         <div class="col-12 col-md-3">
@@ -140,9 +159,10 @@
           <thead>
             <tr>
               <th style="width: 130px;">Hash</th>
-              <th style="width: 150px;">Data / Hora</th>
-              <th style="width: 180px;">Autor</th>
+              <th style="width: 140px; white-space: nowrap;">Data / Hora</th>
+              <th style="width: 160px;">Autor</th>
               <th style="width: 120px;">Repositório</th>
+              <th style="width: 160px; white-space: nowrap;">Branch de Origem</th>
               <th>Mensagem do Commit</th>
               <th style="width: 160px;" class="text-center">Arquivos / XMLs</th>
               <th style="width: 110px;" class="text-center">Status IC</th>
@@ -177,9 +197,18 @@
                   <div class="fw-medium text-light small">{{ commit.author }}</div>
                 </td>
                 <td>
-                  <span class="badge bg-dark border border-secondary text-info small">
+                  <span class="badge bg-dark border border-secondary text-info small text-truncate d-inline-block" style="max-width: 120px;" title="Repositório: {{ commit.repo_name or 'Local' }}">
                     <i class="bi bi-folder2 me-1"></i>{{ commit.repo_name or 'Local' }}
                   </span>
+                </td>
+                <td>
+                  {% if commit.branch %}
+                  <span class="badge bg-primary-subtle text-primary border border-primary-subtle small text-truncate d-inline-block" style="max-width: 140px; font-family: 'JetBrains Mono', monospace; font-size: 0.72rem;" title="Branch de Origem: {{ commit.branch }}">
+                    <i class="bi bi-diagram-2 me-1"></i>{{ commit.branch }}
+                  </span>
+                  {% else %}
+                  <span class="text-muted small">-</span>
+                  {% endif %}
                 </td>
                 <td>
                   <div class="text-light">{{ commit.message }}</div>
@@ -227,7 +256,7 @@
               {% endfor %}
             {% else %}
               <tr id="emptyCommitsRow">
-                <td colspan="8" class="text-center py-5 text-muted">
+                <td colspan="9" class="text-center py-5 text-muted">
                   <i class="bi bi-inbox fs-2 d-block mb-2 text-dim"></i>
                   Nenhum commit encontrado para os filtros selecionados.
                 </td>
@@ -272,5 +301,15 @@
       {{ commit.to_dict()|tojson }}{% if not loop.last %},{% endif %}
     {% endfor %}
   ]
+</script>
+
+<!-- Safe JSON data store for branches autocomplete -->
+<script id="branches-data" type="application/json">
+  {
+    "active": {{ (active_branch or "")|tojson }},
+    "selected": {{ (selected_branch or "")|tojson }},
+    "local": {{ (local_branches or [])|tojson }},
+    "remote": {{ (remote_branches or [])|tojson }}
+  }
 </script>
 {% endblock %}

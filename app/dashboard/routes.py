@@ -94,7 +94,6 @@ def home_view(
                     author=active_author if active_author else None,
                     branch=selected_branch if selected_branch else None,
                 )
-                from app.models.commit import CommitItem
                 commits = [CommitItem(c) for c in raw_commits]
                 is_live_query = True
                 branch_msg = f" na branch '{selected_branch}'" if selected_branch else " em todas as branches"
@@ -440,7 +439,6 @@ def commits_view(
         remote_branches = branch_info.get("remote", [])
 
         try:
-            from app.models.commit import CommitItem
             raw_commits, has_more = GitService.get_commits_paged(
                 repo_path=active_repo,
                 author=author_filter,
@@ -502,6 +500,25 @@ def commits_view(
     )
 
 
+@router.get("/api/git/branches")
+def api_git_branches(
+    repo_path: Optional[str] = Query(None),
+):
+    """API endpoint to get list of active, local, and remote branches for autocomplete."""
+    active_repo = repo_path.strip() if repo_path and repo_path.strip() else settings.DEFAULT_REPO_PATH
+    if not Path(active_repo).exists():
+        return JSONResponse({"success": False, "message": "Repositório não encontrado", "active": "", "local": [], "remote": []})
+
+    branch_info = GitService.get_branches(active_repo)
+    return JSONResponse({
+        "success": True,
+        "active": branch_info.get("active", ""),
+        "local": branch_info.get("local", []),
+        "remote": branch_info.get("remote", []),
+        "total": len(branch_info.get("local", [])) + len(branch_info.get("remote", [])),
+    })
+
+
 @router.get("/api/commits/git-paged")
 def api_commits_git_paged(
     skip: int = Query(0, ge=0),
@@ -533,7 +550,6 @@ def api_commits_git_paged(
             pass
 
     try:
-        from app.models.commit import CommitItem
         raw_commits, has_more = GitService.get_commits_paged(
             repo_path=active_repo,
             author=author_filter,
