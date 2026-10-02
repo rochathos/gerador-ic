@@ -15,6 +15,10 @@ class Meeting(Base):
     start_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
     end_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     duration: Mapped[str] = mapped_column(String(50), nullable=False)  # e.g. "45m" or "1h 30m"
+    contact_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    call_type: Mapped[Optional[str]] = mapped_column(String(50), default="reuniao", nullable=True)
+    redmine_id: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    status: Mapped[str] = mapped_column(String(50), default="pendente", nullable=False)
     execution_id: Mapped[Optional[int]] = mapped_column(
         Integer, ForeignKey("execution_history.id", ondelete="SET NULL"), nullable=True, index=True
     )

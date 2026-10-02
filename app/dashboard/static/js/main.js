@@ -208,8 +208,18 @@ function setupClipboardCopy() {
 function setupSearchForm() {
   const form = document.getElementById("search-form");
   const overlay = document.getElementById("loading-overlay");
+  const saveToDbCheck = document.getElementById("save_to_db");
+  const subtitle = document.getElementById("loading-overlay-subtitle");
+
   if (form && overlay) {
     form.addEventListener("submit", () => {
+      if (subtitle) {
+        if (saveToDbCheck && saveToDbCheck.checked) {
+          subtitle.textContent = "Buscando dados no Git e persistindo no PostgreSQL...";
+        } else {
+          subtitle.textContent = "Consultando commits no Git em tempo real...";
+        }
+      }
       overlay.classList.add("active");
     });
   }
@@ -1053,6 +1063,7 @@ async function loadMoreCommits() {
   const nextSkip = parseInt(configEl.dataset.nextSkip || "0", 10);
   const query = configEl.dataset.query || "";
   const author = configEl.dataset.author || "";
+  const branch = configEl.dataset.branch || "";
   const startDate = configEl.dataset.startDate || "";
   const endDate = configEl.dataset.endDate || "";
   const onlyXml = configEl.dataset.onlyXml === "true";
@@ -1067,6 +1078,7 @@ async function loadMoreCommits() {
     });
     if (query) params.append("q", query);
     if (author) params.append("author", author);
+    if (branch) params.append("branch", branch);
     if (startDate) params.append("start_date", startDate);
     if (endDate) params.append("end_date", endDate);
     if (onlyXml) params.append("only_xml", "true");

@@ -184,14 +184,57 @@ class GitService:
 
 
     @classmethod
+    def get_branches(cls, repo_path: str | Path) -> Dict[str, Any]:
+        """Return active branch, list of local branches, and list of remote branches."""
+        path = Path(repo_path).resolve()
+        is_valid, _ = cls.validate_repository(path)
+        if not is_valid:
+            return {"active": "", "local": [], "remote": []}
+
+        try:
+            repo = git.Repo(path)
+            active = ""
+            try:
+                if not repo.head.is_detached:
+                    active = cls.decode_git_path(repo.active_branch.name)
+            except Exception:
+                pass
+
+            local_set = set()
+            for h in repo.heads:
+                b_name = cls.decode_git_path(h.name)
+                if b_name:
+                    local_set.add(b_name)
+
+            remote_set = set()
+            for r in repo.remotes:
+                try:
+                    for ref in r.refs:
+                        r_name = cls.decode_git_path(ref.name)
+                        if not r_name.endswith("/HEAD"):
+                            remote_set.add(r_name)
+                except Exception:
+                    pass
+
+            return {
+                "active": active,
+                "local": sorted(list(local_set), key=str.lower),
+                "remote": sorted(list(remote_set), key=str.lower),
+            }
+        except Exception as exc:
+            logger.warning(f"Erro ao listar branches do repositório {path}: {exc}")
+            return {"active": "", "local": [], "remote": []}
+
+    @classmethod
     def get_commits(
         cls,
         repo_path: str | Path,
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None,
         author: Optional[str] = None,
+        branch: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
-        """Fetch commits in the specified period, optionally filtered by author."""
+        """Fetch commits in the specified period, optionally filtered by author and branch."""
         path = Path(repo_path).resolve()
         is_valid, msg = cls.validate_repository(path)
         if not is_valid:
@@ -199,7 +242,7 @@ class GitService:
             raise ValueError(msg)
 
         logger.info(
-            f"Buscando commits no repositório '{path}' entre {start_date} e {end_date} (autor: {author or 'TODOS'})"
+            f"Buscando commits no repositório '{path}' entre {start_date} e {end_date} (autor: {author or 'TODOS'}, branch: {branch or 'ALL'})"
         )
 
         repo = git.Repo(path)
@@ -215,17 +258,25 @@ class GitService:
         commits_found: List[Dict[str, Any]] = []
 
         try:
-            # We iterate through all branches/commits
-            # Passing --all ensures commits on any branch are retrieved
-            iter_kwargs: Dict[str, Any] = {
-                "all": True,
-            }
+            clean_b = (branch or "").strip()
+            if clean_b and clean_b.upper() not in ["ALL", "TODAS"]:
+                iter_kwargs: Dict[str, Any] = {"rev": clean_b}
+            else:
+                iter_kwargs: Dict[str, Any] = {"all": True}
             if start_date_tz is not None:
                 iter_kwargs["since"] = int(start_date_tz.timestamp())
             if end_date_tz is not None:
                 iter_kwargs["until"] = int(end_date_tz.timestamp())
 
-            for commit in repo.iter_commits(**iter_kwargs):
+            try:
+                commit_iter = repo.iter_commits(**iter_kwargs)
+            except Exception as iter_err:
+                logger.warning(f"Branch '{clean_b}' não pôde ser iterada diretamente ({iter_err}). Buscando com all=True.")
+                iter_kwargs.pop("rev", None)
+                iter_kwargs["all"] = True
+                commit_iter = repo.iter_commits(**iter_kwargs)
+
+            for commit in commit_iter:
                 commit_dt = commit.committed_datetime
 
                 # Safety check against time boundaries
@@ -380,6 +431,7 @@ class GitService:
         repo_path: str | Path,
         author: Optional[str] = None,
         q: Optional[str] = None,
+        branch: Optional[str] = None,
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None,
         only_xml: bool = False,
@@ -405,7 +457,11 @@ class GitService:
                 return [single_commit], False
 
         # 2. Iterate commits directly from Git
-        iter_kwargs: Dict[str, Any] = {"all": True}
+        clean_b = (branch or "").strip()
+        if clean_b and clean_b.upper() not in ["ALL", "TODAS"]:
+            iter_kwargs: Dict[str, Any] = {"rev": clean_b}
+        else:
+            iter_kwargs: Dict[str, Any] = {"all": True}
         start_date_tz = None
         if start_date is not None:
             start_date_tz = start_date.replace(tzinfo=timezone.utc) if start_date.tzinfo is None else start_date
@@ -424,7 +480,15 @@ class GitService:
         skipped = 0
         query_text = q.strip().lower() if q else ""
 
-        for commit in repo.iter_commits(**iter_kwargs):
+        try:
+            commit_iter = repo.iter_commits(**iter_kwargs)
+        except Exception as iter_err:
+            logger.warning(f"Branch '{clean_b}' não pôde ser iterada diretamente ({iter_err}). Buscando com all=True.")
+            iter_kwargs.pop("rev", None)
+            iter_kwargs["all"] = True
+            commit_iter = repo.iter_commits(**iter_kwargs)
+
+        for commit in commit_iter:
             commit_dt = commit.committed_datetime
             if start_date_tz is not None and commit_dt < start_date_tz:
                 continue
@@ -565,11 +629,12 @@ class GitService:
         start_date: datetime,
         end_date: datetime,
         author: Optional[str] = None,
+        branch: Optional[str] = None,
         notes: Optional[str] = None,
     ) -> Tuple[ExecutionHistory, List[Commit]]:
         """Run complete extraction pipeline: record history, fetch commits, and save to DB."""
         path = Path(repo_path).resolve()
-        logger.info(f"Iniciando ciclo de execução de análise para o período {start_date} até {end_date}")
+        logger.info(f"Iniciando ciclo de execução de análise para o período {start_date} até {end_date} (branch: {branch or 'ALL'})")
 
         # 1. Create Execution History record
         history = ExecutionHistory(
@@ -580,7 +645,7 @@ class GitService:
             total_meetings=0,
             total_catalog_items=0,
             status="processando",
-            notes=notes,
+            notes=notes or (f"Branch: {branch}" if branch else "Todas as Branches"),
         )
         db.add(history)
         db.commit()
@@ -593,6 +658,7 @@ class GitService:
                 start_date=start_date,
                 end_date=end_date,
                 author=author,
+                branch=branch,
             )
 
             # 3. Save to database

@@ -2,6 +2,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 import uvicorn
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.core.config import settings
@@ -35,6 +36,34 @@ app = FastAPI(
     redoc_url="/redoc" if settings.APP_DEBUG else None,
     lifespan=lifespan,
 )
+
+# Enable CORS for Microsoft Teams Web and local integration
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+@app.middleware("http")
+async def add_private_network_access_headers(request, call_next):
+    """Handle Chrome Private Network Access (PNA) preflight and response headers."""
+    from starlette.responses import Response
+
+    if request.method == "OPTIONS":
+        response = Response(status_code=204)
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        response.headers["Access-Control-Allow-Methods"] = "*"
+        response.headers["Access-Control-Allow-Headers"] = "*"
+        response.headers["Access-Control-Allow-Private-Network"] = "true"
+        return response
+
+    response = await call_next(request)
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Private-Network"] = "true"
+    return response
 
 # Mount static files
 static_dir = Path(__file__).resolve().parent / "app" / "dashboard" / "static"

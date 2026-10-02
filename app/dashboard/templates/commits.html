@@ -35,7 +35,7 @@
   <div class="col-12">
     <div class="card-glass p-3">
       <form method="GET" action="/commits" class="row g-3 align-items-end" id="commitsFilterForm">
-        <div class="col-12 col-md-2">
+        <div class="col-12 col-md-3">
           <label class="form-label text-muted small fw-semibold">Repositório</label>
           <select name="repo_name" class="form-select form-select-custom">
             {% for r in available_repos %}
@@ -44,22 +44,40 @@
           </select>
         </div>
 
-        <div class="col-12 col-sm-6 col-md-2">
+        <div class="col-12 col-md-3">
+          <label class="form-label text-muted small fw-semibold">Branch Git</label>
+          <select name="branch" id="filter_branch" class="form-select form-select-custom">
+            <option value="" {% if not selected_branch %}selected{% endif %}>Todas as Branches (--all)</option>
+            {% if active_branch %}
+            <option value="{{ active_branch }}" {% if selected_branch == active_branch %}selected{% endif %}>
+              ⭐ Atual: {{ active_branch }}
+            </option>
+            {% endif %}
+            {% if local_branches %}
+            <optgroup label="Branches Locais ({{ local_branches|length }})">
+              {% for b in local_branches %}
+                {% if b != active_branch %}
+                <option value="{{ b }}" {% if selected_branch == b %}selected{% endif %}>{{ b }}</option>
+                {% endif %}
+              {% endfor %}
+            </optgroup>
+            {% endif %}
+            {% if remote_branches %}
+            <optgroup label="Branches Remotas / origin ({{ remote_branches|length }})">
+              {% for b in remote_branches %}
+                <option value="{{ b }}" {% if selected_branch == b %}selected{% endif %}>{{ b }}</option>
+              {% endfor %}
+            </optgroup>
+            {% endif %}
+          </select>
+        </div>
+
+        <div class="col-12 col-md-3">
           <label class="form-label text-muted small fw-semibold">Autor (Git)</label>
           <input type="text" name="author" id="filter_author" class="form-control form-control-custom" value="{{ filter_author }}" placeholder="Nome do autor...">
         </div>
 
-        <div class="col-12 col-sm-6 col-md-2">
-          <label class="form-label text-muted small fw-semibold">Data Inicial</label>
-          <input type="date" name="start_date" id="filter_start_date" class="form-control form-control-custom" value="{{ filter_start_date }}">
-        </div>
-
-        <div class="col-12 col-sm-6 col-md-2">
-          <label class="form-label text-muted small fw-semibold">Data Final</label>
-          <input type="date" name="end_date" id="filter_end_date" class="form-control form-control-custom" value="{{ filter_end_date }}">
-        </div>
-
-        <div class="col-12 col-md-2">
+        <div class="col-12 col-md-3">
           <label class="form-label text-muted small fw-semibold">Buscar Hash / Msg</label>
           <div class="input-group">
             <span class="input-group-text bg-dark border-secondary text-muted"><i class="bi bi-search"></i></span>
@@ -67,9 +85,19 @@
           </div>
         </div>
 
-        <div class="col-12 col-md-2 d-flex gap-2">
+        <div class="col-12 col-sm-6 col-md-4">
+          <label class="form-label text-muted small fw-semibold">Data Inicial</label>
+          <input type="date" name="start_date" id="filter_start_date" class="form-control form-control-custom" value="{{ filter_start_date }}">
+        </div>
+
+        <div class="col-12 col-sm-6 col-md-4">
+          <label class="form-label text-muted small fw-semibold">Data Final</label>
+          <input type="date" name="end_date" id="filter_end_date" class="form-control form-control-custom" value="{{ filter_end_date }}">
+        </div>
+
+        <div class="col-12 col-md-4 d-flex gap-2">
           <button type="submit" class="btn btn-primary-custom flex-grow-1">
-            <i class="bi bi-funnel"></i> Filtrar
+            <i class="bi bi-funnel"></i> Filtrar Commits
           </button>
           <a href="/commits" class="btn btn-secondary-custom" title="Limpar filtros">
             <i class="bi bi-x-lg"></i>
@@ -231,6 +259,7 @@
      data-has-more="{{ 'true' if has_more else 'false' }}"
      data-query="{{ filter_query }}"
      data-author="{{ filter_author }}"
+     data-branch="{{ selected_branch or '' }}"
      data-start-date="{{ filter_start_date }}"
      data-end-date="{{ filter_end_date }}"
      data-only-xml="{{ 'true' if only_xml else 'false' }}">

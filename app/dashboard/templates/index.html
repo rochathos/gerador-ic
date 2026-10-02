@@ -159,6 +159,38 @@
           <div class="form-text text-dim small">Ex: seu.nome ou seu.email@tjce.jus.br</div>
         </div>
 
+        <div class="mb-3">
+          <label for="branch" class="form-label text-muted small fw-semibold">Branch Git</label>
+          <div class="input-group">
+            <span class="input-group-text bg-dark border-secondary text-muted"><i class="bi bi-diagram-2"></i></span>
+            <select class="form-select form-control-custom" id="branch" name="branch">
+              <option value="" {% if not selected_branch %}selected{% endif %}>Todas as Branches (--all)</option>
+              {% if active_branch %}
+              <option value="{{ active_branch }}" {% if selected_branch == active_branch %}selected{% endif %}>
+                ⭐ Branch Atual: {{ active_branch }}
+              </option>
+              {% endif %}
+              {% if local_branches %}
+              <optgroup label="Branches Locais ({{ local_branches|length }})">
+                {% for b in local_branches %}
+                  {% if b != active_branch %}
+                  <option value="{{ b }}" {% if selected_branch == b %}selected{% endif %}>{{ b }}</option>
+                  {% endif %}
+                {% endfor %}
+              </optgroup>
+              {% endif %}
+              {% if remote_branches %}
+              <optgroup label="Branches Remotas / origin ({{ remote_branches|length }})">
+                {% for b in remote_branches %}
+                  <option value="{{ b }}" {% if selected_branch == b %}selected{% endif %}>{{ b }}</option>
+                {% endfor %}
+              </optgroup>
+              {% endif %}
+            </select>
+          </div>
+          <div class="form-text text-dim small">Selecione uma branch específica ou mantenha em "Todas as Branches".</div>
+        </div>
+
         <div class="form-check form-switch mb-4">
           <input class="form-check-input" type="checkbox" role="switch" id="save_to_db" name="save_to_db" value="true">
           <label class="form-check-label text-muted small fw-semibold" for="save_to_db">

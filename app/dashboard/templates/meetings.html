@@ -1,81 +1,266 @@
 {% extends "base.html" %}
 
-{% block title %}Reuniões - Productivity Assistant{% endblock %}
+{% block title %}Reuniões & Ligações Teams - Productivity Assistant{% endblock %}
 
 {% block content %}
-<div class="row g-4 mb-4">
+<div class="row g-4 mb-5">
+  <!-- Page Header -->
   <div class="col-12 d-flex flex-wrap justify-content-between align-items-center gap-3">
     <div>
       <h2 class="fw-bold mb-1 d-flex align-items-center gap-2">
-        <i class="bi bi-calendar3 text-info"></i> Reuniões
+        <i class="bi bi-telephone-inbound text-info"></i> Reuniões & Ligações (Microsoft Teams)
       </h2>
       <p class="text-muted mb-0">
-        Reuniões realizadas pelo usuário no período selecionado (preparado para integração Microsoft Teams na Fase 2).
+        Captura de chamadas avulsas e reuniões do Teams para geração automática de Itens de Catálogo (ICs) de Gestão no Redmine.
       </p>
     </div>
-    <div>
-      <a href="/" class="btn btn-secondary-custom">
-        <i class="bi bi-arrow-left me-1"></i> Voltar ao Painel
+    <div class="d-flex flex-wrap gap-2">
+      <!-- Importar do Teams (Dropdown limpo) -->
+      <div class="dropdown">
+        <button class="btn btn-outline-info dropdown-toggle d-flex align-items-center gap-2" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+          <i class="bi bi-microsoft-teams"></i> Importar do Teams
+        </button>
+        <ul class="dropdown-menu dropdown-menu-dark dropdown-menu-end shadow border-secondary border-opacity-25" style="min-width: 270px;">
+          <li>
+            <button class="dropdown-item d-flex align-items-center gap-2 py-2" onclick="copyBookmarkletCode(this)">
+              <i class="bi bi-terminal text-info fs-5"></i>
+              <div>
+                <div class="fw-semibold">Copiar Script do Console (F12)</div>
+                <div class="text-muted small" style="font-size: 0.72rem;">Cole no Teams Web para capturar</div>
+              </div>
+            </button>
+          </li>
+          <li>
+            <button class="dropdown-item d-flex align-items-center gap-2 py-2" onclick="openPasteJsonModal()">
+              <i class="bi bi-clipboard-data text-success fs-5"></i>
+              <div>
+                <div class="fw-semibold">Colar Chamadas (JSON)</div>
+                <div class="text-muted small" style="font-size: 0.72rem;">Importe dados copiados do Teams</div>
+              </div>
+            </button>
+          </li>
+          <li><hr class="dropdown-divider border-secondary border-opacity-25 my-1"></li>
+          <li>
+            <button class="dropdown-item d-flex align-items-center gap-2 py-2 text-warning" onclick="showBookmarkletInstructions()">
+              <i class="bi bi-question-circle"></i>
+              <span class="small">Instruções de Uso</span>
+            </button>
+          </li>
+        </ul>
+      </div>
+
+      <button type="button" class="btn btn-outline-light d-flex align-items-center gap-2" onclick="openManualMeetingModal()">
+        <i class="bi bi-plus-circle"></i> Nova Chamada
+      </button>
+
+      <a href="/" class="btn btn-secondary-custom d-flex align-items-center gap-2">
+        <i class="bi bi-arrow-left"></i> Voltar ao Painel
       </a>
     </div>
   </div>
 
-  <!-- Teams status banner -->
-  <div class="col-12">
-    <div class="card-glass p-3 border-info border-opacity-25 bg-opacity-25 d-flex align-items-center gap-3">
-      <div class="stat-icon info" style="width:40px; height:40px;">
-        <i class="bi bi-microsoft"></i>
-      </div>
-      <div>
-        <div class="fw-bold text-light">Módulo de Reuniões & Calendário</div>
-        <div class="text-muted small">
-          A estrutura de dados e persistência no PostgreSQL está pronta. Na Fase 2 será habilitada a leitura direta do calendário do Microsoft Teams.
+  <!-- Stat Cards -->
+  <div class="col-12 col-sm-6 col-xl-3">
+    <div class="card-glass stat-card">
+      <div class="d-flex justify-content-between align-items-start mb-2">
+        <div>
+          <div class="stat-label">Total de Chamadas</div>
+          <div class="stat-value text-info">{{ total_meetings }}</div>
+        </div>
+        <div class="stat-icon info">
+          <i class="bi bi-telephone"></i>
         </div>
       </div>
+      <div class="text-muted small">Registradas no sistema</div>
+    </div>
+  </div>
+
+  <div class="col-12 col-sm-6 col-xl-3">
+    <div class="card-glass stat-card">
+      <div class="d-flex justify-content-between align-items-start mb-2">
+        <div>
+          <div class="stat-label">Tempo Acumulado</div>
+          <div class="stat-value text-light">{{ total_duration_str }}</div>
+        </div>
+        <div class="stat-icon success">
+          <i class="bi bi-stopwatch"></i>
+        </div>
+      </div>
+      <div class="text-muted small">Duração total de alinhamentos</div>
+    </div>
+  </div>
+
+  <div class="col-12 col-sm-6 col-xl-3">
+    <div class="card-glass stat-card">
+      <div class="d-flex justify-content-between align-items-start mb-2">
+        <div>
+          <div class="stat-label">Pendentes de IC</div>
+          <div class="stat-value text-warning">{{ total_pending }}</div>
+        </div>
+        <div class="stat-icon warning">
+          <i class="bi bi-clock-history"></i>
+        </div>
+      </div>
+      <div class="text-muted small">Aguardando envio ao Redmine</div>
+    </div>
+  </div>
+
+  <div class="col-12 col-sm-6 col-xl-3">
+    <div class="card-glass stat-card">
+      <div class="d-flex justify-content-between align-items-start mb-2">
+        <div>
+          <div class="stat-label">ICs Gerados</div>
+          <div class="stat-value text-success">{{ total_created }}</div>
+        </div>
+        <div class="stat-icon success">
+          <i class="bi bi-check-circle"></i>
+        </div>
+      </div>
+      <div class="text-muted small">Tarefas criadas no Redmine</div>
+    </div>
+  </div>
+
+  <!-- Filters & Search -->
+  <div class="col-12">
+    <div class="card-glass p-3">
+      <form method="GET" action="/meetings" class="row g-3 align-items-end" id="meetingsFilterForm">
+        <div class="col-12 col-md-3">
+          <label class="form-label text-muted small fw-semibold">Buscar Contato / Título</label>
+          <div class="input-group">
+            <span class="input-group-text bg-dark border-secondary text-muted"><i class="bi bi-search"></i></span>
+            <input type="text" name="search" class="form-control form-control-custom" value="{{ filter_search }}" placeholder="Nome do colega...">
+          </div>
+        </div>
+        <div class="col-12 col-sm-6 col-md-2">
+          <label class="form-label text-muted small fw-semibold">Data Inicial</label>
+          <input type="date" name="start_date" class="form-control form-control-custom" value="{{ filter_start_date }}">
+        </div>
+        <div class="col-12 col-sm-6 col-md-2">
+          <label class="form-label text-muted small fw-semibold">Data Final</label>
+          <input type="date" name="end_date" class="form-control form-control-custom" value="{{ filter_end_date }}">
+        </div>
+        <div class="col-12 col-sm-6 col-md-2">
+          <label class="form-label text-muted small fw-semibold">Status Redmine</label>
+          <select name="status" class="form-select form-control-custom">
+            <option value="" {% if not filter_status %}selected{% endif %}>Todos os Status</option>
+            <option value="pendente" {% if filter_status == 'pendente' %}selected{% endif %}>Pendente</option>
+            <option value="criado" {% if filter_status == 'criado' %}selected{% endif %}>Criado no Redmine</option>
+          </select>
+        </div>
+        <div class="col-12 col-md-3 d-flex gap-2">
+          <button type="submit" class="btn btn-primary-custom flex-grow-1">
+            <i class="bi bi-funnel"></i> Filtrar
+          </button>
+          <a href="/meetings" class="btn btn-secondary-custom" title="Limpar filtros">
+            <i class="bi bi-x-lg"></i>
+          </a>
+        </div>
+      </form>
     </div>
   </div>
 
   <!-- Meetings Table -->
   <div class="col-12">
     <div class="card-glass">
-      <div class="p-3 border-bottom border-secondary border-opacity-25">
-        <span class="text-muted small">Total de reuniões registradas: <b class="text-light">{{ meetings|length }}</b></span>
+      <div class="p-3 border-bottom border-secondary border-opacity-25 d-flex flex-wrap justify-content-between align-items-center gap-2">
+        <div class="d-flex align-items-center gap-3">
+          <div class="form-check mb-0">
+            <input class="form-check-input" type="checkbox" id="selectAllMeetings" onchange="toggleSelectAllMeetings(this)">
+            <label class="form-check-label text-muted small fw-semibold" for="selectAllMeetings">
+              Selecionar Todas
+            </label>
+          </div>
+          <span class="text-muted small">&bull; Total: <b class="text-light">{{ meetings|length }}</b> chamadas</span>
+        </div>
+        <div class="d-flex gap-2">
+          <button type="button" class="btn btn-sm btn-outline-danger" onclick="deleteSelectedMeetings()" title="Excluir chamadas selecionadas">
+            <i class="bi bi-trash"></i> Excluir
+          </button>
+        </div>
       </div>
 
       <div class="table-responsive">
-        <table class="table table-custom align-middle">
+        <table class="table table-custom align-middle mb-0">
           <thead>
             <tr>
-              <th>Título da Reunião</th>
-              <th style="width: 200px;">Horário Inicial</th>
-              <th style="width: 200px;">Horário Final</th>
-              <th style="width: 140px;" class="text-center">Duração</th>
+              <th style="width: 40px;" class="text-center">#</th>
+              <th>Contato / Título da Chamada</th>
+              <th style="width: 130px;">Tipo</th>
+              <th style="width: 170px;">Data & Horário</th>
+              <th style="width: 120px;" class="text-center">Duração</th>
+              <th style="width: 150px;" class="text-center">Status Redmine</th>
+              <th style="width: 120px;" class="text-end">Ações</th>
             </tr>
           </thead>
           <tbody>
             {% if meetings %}
               {% for m in meetings %}
-              <tr>
-                <td>
-                  <div class="fw-medium text-light">{{ m.title }}</div>
+              <tr id="meeting-row-{{ m.id }}">
+                <td class="text-center">
+                  <input type="checkbox" class="form-check-input meeting-checkbox" value="{{ m.id }}" data-duration="{{ m.duration }}" onchange="updateSelectedMeetingsBar()">
                 </td>
-                <td class="text-muted small">
+                <td>
+                  <div class="d-flex align-items-center gap-2">
+                    <div class="avatar-placeholder rounded-circle bg-secondary bg-opacity-25 text-info d-flex align-items-center justify-content-center fw-bold" style="width: 32px; height: 32px; font-size: 13px;">
+                      {{ (m.contact_name or m.title)[0]|upper }}
+                    </div>
+                    <div>
+                      <div class="fw-semibold text-light">{{ m.title }}</div>
+                      {% if m.contact_name %}
+                      <div class="text-muted small" style="font-size: 0.75rem;">
+                        <i class="bi bi-person me-1"></i>{{ m.contact_name }}
+                      </div>
+                      {% endif %}
+                    </div>
+                  </div>
+                </td>
+                <td>
+                  {% if m.call_type == 'efetuada' %}
+                    <span class="badge bg-primary-subtle text-primary border border-primary-subtle d-inline-flex align-items-center gap-1">
+                      <i class="bi bi-telephone-outbound"></i> Efetuada
+                    </span>
+                  {% elif m.call_type == 'recebida' %}
+                    <span class="badge bg-success-subtle text-success border border-success-subtle d-inline-flex align-items-center gap-1">
+                      <i class="bi bi-telephone-inbound"></i> Recebida
+                    </span>
+                  {% else %}
+                    <span class="badge bg-info-subtle text-info border border-info-subtle d-inline-flex align-items-center gap-1">
+                      <i class="bi bi-people"></i> Reunião
+                    </span>
+                  {% endif %}
+                </td>
+                <td class="text-muted small font-monospace">
                   {{ m.start_time.strftime("%d/%m/%Y %H:%M") }}
                 </td>
-                <td class="text-muted small">
-                  {{ m.end_time.strftime("%d/%m/%Y %H:%M") }}
-                </td>
                 <td class="text-center">
-                  <span class="badge bg-dark border border-secondary text-info">{{ m.duration }}</span>
+                  <span class="badge bg-dark border border-secondary text-info font-monospace">{{ m.duration }}</span>
+                </td>
+                <td class="text-center" id="meeting-status-{{ m.id }}">
+                  {% if m.status == 'criado' and m.redmine_id %}
+                    <a href="https://redmine.tjce.jus.br/issues/{{ m.redmine_id }}" target="_blank" class="badge bg-success text-decoration-none d-inline-flex align-items-center gap-1" title="Abrir tarefa no Redmine">
+                      <i class="bi bi-check-circle-fill"></i> #{{ m.redmine_id }}
+                    </a>
+                  {% else %}
+                    <span class="badge bg-warning bg-opacity-25 text-warning border border-warning border-opacity-25">
+                      Pendente
+                    </span>
+                  {% endif %}
+                </td>
+                <td class="text-end">
+                  <button type="button" class="btn btn-sm btn-outline-warning d-inline-flex align-items-center gap-1" onclick="openMeetingICModal({{ m.id }}, '{{ m.title|replace('\'', '\\\'') }}', '{{ m.contact_name or '' }}', '{{ m.duration }}', '{{ m.start_time.strftime('%d/%m/%Y %H:%M') }}')">
+                    <i class="bi bi-plus-circle"></i> Criar IC
+                  </button>
                 </td>
               </tr>
               {% endfor %}
             {% else %}
               <tr>
-                <td colspan="4" class="text-center py-5 text-muted">
-                  <i class="bi bi-calendar-x fs-2 d-block mb-2 text-dim"></i>
-                  Nenhuma reunião registrada no período.<br/>
-                  A integração do Microsoft Teams estará ativa na Fase 2.
+                <td colspan="7" class="text-center py-5 text-muted">
+                  <i class="bi bi-telephone-x fs-1 d-block mb-3 text-secondary opacity-50"></i>
+                  <h6 class="text-light fw-bold">Nenhuma chamada ou reunião encontrada</h6>
+                  <p class="small text-muted mb-0">
+                    Use o menu <b class="text-info">Importar do Teams</b> no topo da página ou registre com <b class="text-light">Nova Chamada</b>.
+                  </p>
                 </td>
               </tr>
             {% endif %}
@@ -85,4 +270,236 @@
     </div>
   </div>
 </div>
+
+<!-- Floating Action Bar for Selected Meetings -->
+<div id="selectedMeetingsBar" class="d-none position-fixed bottom-0 start-50 translate-middle-x mb-4 p-3 rounded-4 shadow-lg border border-secondary border-opacity-50" style="background: rgba(17, 24, 39, 0.95); backdrop-filter: blur(12px); z-index: 1040; width: 90%; max-width: 720px;">
+  <div class="d-flex flex-wrap justify-content-between align-items-center gap-3">
+    <div class="d-flex align-items-center gap-2">
+      <span class="badge bg-primary px-2 py-1 fs-6" id="selectedCountBadge">0</span>
+      <span class="text-light fw-semibold small">chamadas selecionadas</span>
+    </div>
+    <div class="d-flex gap-2">
+      <button type="button" class="btn btn-sm btn-secondary-custom" onclick="clearSelectedMeetings()">Cancelar</button>
+      <button type="button" class="btn btn-sm btn-warning text-dark fw-bold d-flex align-items-center gap-2" onclick="openConsolidatedMeetingICModal()">
+        <i class="bi bi-collection-play-fill"></i> Gerar IC Consolidado no Redmine
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Meeting IC Modal (Single or Consolidated) -->
+<div class="modal fade" id="meetingICModal" tabindex="-1" aria-labelledby="meetingICModalTitle" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-lg">
+    <div class="modal-content modal-content-custom">
+      <div class="modal-header modal-header-custom">
+        <h5 class="modal-title d-flex align-items-center gap-2" id="meetingICModalTitle">
+          <i class="bi bi-telephone-plus text-info"></i> Item de Catálogo (IC) de Reunião
+        </h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body p-4">
+        <div class="alert alert-info bg-info bg-opacity-10 border-info border-opacity-25 d-flex align-items-center justify-content-between p-2 mb-3 small">
+          <div><i class="bi bi-info-circle me-1 text-info"></i> Evidência de Reunião/Chamada Teams estruturada para o TJCE.</div>
+          <span id="meetingCountBadge" class="badge bg-info text-dark fw-bold">1 Reunião</span>
+        </div>
+
+        <div class="mb-3">
+          <label for="meetingInputTitle" class="form-label text-muted small fw-bold mb-1">TÍTULO DO IC (REDMINE):</label>
+          <input type="text" class="form-control form-control-custom fw-semibold" id="meetingInputTitle">
+        </div>
+
+        <div class="row g-3 mb-3">
+          <div class="col-12 col-md-6">
+            <label for="meetingInputActivity" class="form-label text-muted small fw-bold mb-1">
+              <i class="bi bi-tag text-info me-1"></i> [DEVPJE] - ATIVIDADE CATÁLOGO (#455):
+            </label>
+            <select class="form-select form-control-custom fw-semibold" id="meetingInputActivity">
+              <option value="Gestão - Participação em reunião, exceto reunião de levantamento de requisitos" selected>
+                Gestão - Participação em reunião, exceto reunião de levantamento de requisitos
+              </option>
+              <option value="Gestão - Acompanhamento e registro de reuniões diárias">
+                Gestão - Acompanhamento e registro de reuniões diárias
+              </option>
+              <option value="Gestão - Reunião de planejamento de sprint">
+                Gestão - Reunião de planejamento de sprint
+              </option>
+            </select>
+          </div>
+          <div class="col-12 col-md-3">
+            <label for="meetingInputComplexity" class="form-label text-muted small fw-bold mb-1">
+              <i class="bi bi-speedometer2 text-warning me-1"></i> COMPLEXIDADE (#456):
+            </label>
+            <select class="form-select form-control-custom fw-semibold" id="meetingInputComplexity">
+              <option value="Baixa" selected>Baixa</option>
+              <option value="Média">Média</option>
+              <option value="Alta">Alta</option>
+              <option value="Especialista">Especialista</option>
+            </select>
+          </div>
+          <div class="col-12 col-md-3">
+            <label for="meetingInputQuantity" class="form-label text-muted small fw-bold mb-1">
+              <i class="bi bi-123 text-success me-1"></i> QUANTIDADE (#457):
+            </label>
+            <input type="number" min="1" class="form-control form-control-custom fw-semibold font-monospace" id="meetingInputQuantity" value="1">
+          </div>
+        </div>
+
+        <div class="mb-3">
+          <label for="meetingInputDesc" class="form-label text-muted small fw-bold mb-1">DESCRIÇÃO & NOTA DE EVIDÊNCIA (REDMINE):</label>
+          <textarea class="form-control form-control-custom font-monospace small" id="meetingInputDesc" rows="8" style="resize: vertical;"></textarea>
+        </div>
+
+        <div id="meetingFeedbackAlert" class="alert alert-success d-none py-2 px-3 small d-flex align-items-center gap-2">
+          <i class="bi bi-check-circle-fill"></i> <span id="meetingFeedbackText"></span>
+        </div>
+
+        <!-- Real-time Redmine API Logs -->
+        <div id="meetingRedmineLogsContainer" class="d-none mt-2 p-2 rounded bg-dark border border-secondary border-opacity-50 small font-monospace" style="max-height: 140px; overflow-y: auto; font-size: 0.75rem;">
+          <div class="text-muted fw-bold mb-1 d-flex align-items-center justify-content-between">
+            <span><i class="bi bi-terminal me-1 text-warning"></i> Log de Execução Redmine API:</span>
+            <span id="meetingRedmineLogsStatus" class="badge bg-secondary">Aguardando</span>
+          </div>
+          <div id="meetingRedmineLogsList" class="text-secondary small"></div>
+        </div>
+      </div>
+      <div class="modal-footer modal-footer-custom d-flex justify-content-between">
+        <button type="button" class="btn btn-secondary-custom" data-bs-dismiss="modal">Fechar</button>
+        <div class="d-flex flex-wrap gap-2">
+          <button type="button" class="btn btn-outline-warning d-flex align-items-center gap-1" id="btnSimulateMeetingIC" onclick="executeMeetingICCreation(this, true)" title="Valida a criação sem enviar ao Redmine">
+            <i class="bi bi-shield-check"></i> Testar no Redmine (Simulação)
+          </button>
+          <button type="button" class="btn btn-warning text-dark fw-bold d-flex align-items-center gap-1" id="btnCreateMeetingIC" onclick="executeMeetingICCreation(this, false)">
+            <i class="bi bi-cloud-arrow-up-fill"></i> Criar no Redmine
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Manual Call Modal -->
+<div class="modal fade" id="manualCallModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content modal-content-custom">
+      <div class="modal-header modal-header-custom">
+        <h5 class="modal-title d-flex align-items-center gap-2 text-info">
+          <i class="bi bi-plus-circle"></i> Registrar Chamada Avulsa
+        </h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body p-4">
+        <div class="mb-3">
+          <label class="form-label text-muted small fw-bold">NOME DO CONTATO / COLEGA:</label>
+          <input type="text" id="manualContactName" class="form-control form-control-custom" placeholder="Ex: Lucas Oliveira">
+        </div>
+        <div class="row g-2 mb-3">
+          <div class="col-6">
+            <label class="form-label text-muted small fw-bold">TIPO:</label>
+            <select id="manualCallType" class="form-select form-control-custom">
+              <option value="efetuada" selected>Efetuada</option>
+              <option value="recebida">Recebida</option>
+              <option value="reuniao">Reunião em Grupo</option>
+            </select>
+          </div>
+          <div class="col-6">
+            <label class="form-label text-muted small fw-bold">DURAÇÃO:</label>
+            <input type="text" id="manualDuration" class="form-control form-control-custom" placeholder="Ex: 35m ou 1h 10m" value="30m">
+          </div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label text-muted small fw-bold">DATA E HORA:</label>
+          <input type="datetime-local" id="manualDateTime" class="form-control form-control-custom">
+        </div>
+        <div class="mb-3">
+          <label class="form-label text-muted small fw-bold">ASSUNTO / TÍTULO:</label>
+          <input type="text" id="manualTitle" class="form-control form-control-custom" placeholder="Ex: Alinhamento de regras de negócio PJe">
+        </div>
+      </div>
+      <div class="modal-footer modal-footer-custom">
+        <button type="button" class="btn btn-secondary-custom" data-bs-dismiss="modal">Cancelar</button>
+        <button type="button" class="btn btn-primary-custom" onclick="submitManualCall()">Salvar Chamada</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Paste JSON Modal -->
+<div class="modal fade" id="pasteJsonModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content modal-content-custom">
+      <div class="modal-header modal-header-custom">
+        <h5 class="modal-title d-flex align-items-center gap-2 text-info">
+          <i class="bi bi-clipboard-data"></i> Colar Chamadas do Teams (JSON)
+        </h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body p-4">
+        <p class="text-muted small mb-2">
+          Cole abaixo a lista de chamadas copiada pelo widget no Teams Web:
+        </p>
+        <textarea id="pastedJsonTextarea" class="form-control form-control-custom font-monospace" rows="8" placeholder='[
+  {
+    "contact_name": "Lucas Oliveira",
+    "call_type": "efetuada",
+    "duration": "35m 12s",
+    "date_str": "Hoje, 09:30"
+  }
+]'></textarea>
+      </div>
+      <div class="modal-footer modal-footer-custom">
+        <button type="button" class="btn btn-outline-info me-auto btn-sm" onclick="pasteFromClipboard()">
+          <i class="bi bi-clipboard-check me-1"></i> Colar da Área de Transferência
+        </button>
+        <button type="button" class="btn btn-secondary-custom" data-bs-dismiss="modal">Cancelar</button>
+        <button type="button" class="btn btn-primary-custom" onclick="submitPastedJson()">Importar Chamadas</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Instructions Modal -->
+<div class="modal fade" id="bookmarkletInstructionsModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-lg">
+    <div class="modal-content modal-content-custom">
+      <div class="modal-header modal-header-custom">
+        <h5 class="modal-title d-flex align-items-center gap-2 text-warning">
+          <i class="bi bi-bookmark-star-fill"></i> Como Capturar Chamadas do Teams Web
+        </h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body p-4">
+        <div class="d-flex flex-column gap-3">
+          <div class="p-3 rounded bg-dark bg-opacity-50 border border-primary border-opacity-25">
+            <div class="fw-bold text-info mb-1"><i class="bi bi-terminal me-1"></i> Método 1: Direto pelo Console F12 (Mais Confiável)</div>
+            <div class="text-muted small">
+              1. Clique no botão <b>"Copiar Código para o Console (F12)"</b> nesta tela.<br>
+              2. Vá na aba do Teams Web (onde está em <i>Chamadas &gt; Histórico</i>).<br>
+              3. Pressione <b>F12</b> no teclado, clique na aba <b>Console</b>, dê <b>Ctrl + V</b> e pressione <b>Enter</b>.<br>
+              4. O painel flutuante do Productivity Assistant abrirá instantaneamente na tela do Teams!
+            </div>
+          </div>
+          <div class="p-3 rounded bg-dark bg-opacity-50 border border-secondary border-opacity-25">
+            <div class="fw-bold text-warning mb-1"><i class="bi bi-bookmark-star me-1"></i> Método 2: Pela Barra de Favoritos (Bookmarklet)</div>
+            <div class="text-muted small">
+              Arraste o botão amarelo <b>"📞 Capturar Chamadas do Teams"</b> para sua barra de favoritos. No Teams Web na aba Histórico, basta clicar no favorito.
+            </div>
+          </div>
+          <div class="p-3 rounded bg-dark bg-opacity-50 border border-success border-opacity-25">
+            <div class="fw-bold text-success mb-1"><i class="bi bi-clipboard-check me-1"></i> Se a política do TJCE bloquear o envio de rede (CSP):</div>
+            <div class="text-muted small">
+              No painel que abrir no Teams, clique em <b>"📋 Copiar JSON"</b>. Depois volte aqui e clique em <b>"Colar Chamadas (JSON)"</b> para importar tudo em 1 segundo.
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer modal-footer-custom">
+        <button type="button" class="btn btn-secondary-custom" data-bs-dismiss="modal">Entendi</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="/static/js/meetings.js"></script>
 {% endblock %}

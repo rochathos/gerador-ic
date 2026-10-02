@@ -1,6 +1,7 @@
 from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Optional, List
+from urllib.parse import quote_plus
 from fastapi import APIRouter, Depends, Form, Request, Query
 from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
@@ -18,6 +19,7 @@ from app.services.git_service import GitService
 from app.services.catalog_generator_service import CatalogGeneratorService
 from app.services.report_service import ReportService
 from app.services.redmine_service import RedmineService
+from app.services.meeting_service import MeetingService
 
 router = APIRouter()
 
@@ -43,6 +45,7 @@ def home_view(
     end_date: Optional[str] = Query(None),
     repo_path: Optional[str] = Query(None),
     author: Optional[str] = Query(None),
+    branch: Optional[str] = Query(None),
     alert_message: Optional[str] = None,
     alert_type: Optional[str] = "info",
     db: Session = Depends(get_db),
@@ -60,9 +63,19 @@ def home_view(
 
     active_repo = repo_path.strip() if repo_path else settings.DEFAULT_GIT_REPO_PATH
     active_author = author.strip() if author is not None else (settings.GIT_AUTHOR_NAME or "")
+    selected_branch = branch.strip() if branch else ""
 
     commits = []
     is_live_query = False
+
+    active_branch = ""
+    local_branches = []
+    remote_branches = []
+    if Path(active_repo).exists():
+        branch_info = GitService.get_branches(active_repo)
+        active_branch = branch_info.get("active", "")
+        local_branches = branch_info.get("local", [])
+        remote_branches = branch_info.get("remote", [])
 
     # Check if user performed a search/consultation
     if start_date and end_date:
@@ -79,11 +92,13 @@ def home_view(
                     start_date=s_dt,
                     end_date=e_dt,
                     author=active_author if active_author else None,
+                    branch=selected_branch if selected_branch else None,
                 )
                 from app.models.commit import CommitItem
                 commits = [CommitItem(c) for c in raw_commits]
                 is_live_query = True
-                alert_message = alert_message or f"Consulta realizada diretamente no Git: {len(commits)} commits encontrados (nenhum dado salvo no banco)."
+                branch_msg = f" na branch '{selected_branch}'" if selected_branch else " em todas as branches"
+                alert_message = alert_message or f"Consulta realizada diretamente no Git: {len(commits)} commits encontrados{branch_msg} (nenhum dado salvo no banco)."
                 alert_type = "info"
             else:
                 alert_message = msg
@@ -109,6 +124,7 @@ def home_view(
                 raw_commits, _ = GitService.get_commits_paged(
                     repo_path=active_repo,
                     author=active_author if active_author else None,
+                    branch=selected_branch if selected_branch else None,
                     skip=0,
                     limit=15,
                 )
@@ -151,6 +167,10 @@ def home_view(
             "alert_message": alert_message,
             "alert_type": alert_type,
             "author_name": settings.GIT_AUTHOR_NAME,
+            "active_branch": active_branch,
+            "local_branches": local_branches,
+            "remote_branches": remote_branches,
+            "selected_branch": selected_branch,
         },
     )
 
@@ -162,6 +182,7 @@ def analyze_period(
     end_date: str = Form(...),
     repo_path: str = Form(...),
     author: Optional[str] = Form(None),
+    branch: Optional[str] = Form(None),
     save_to_db: Optional[bool] = Form(False),
     db: Session = Depends(get_db),
 ):
@@ -185,6 +206,8 @@ def analyze_period(
             status_code=303,
         )
 
+    clean_branch = branch.strip() if branch else ""
+
     # If save_to_db was explicitly requested
     if save_to_db:
         try:
@@ -194,6 +217,7 @@ def analyze_period(
                 start_date=start_dt,
                 end_date=end_dt,
                 author=author.strip() if author else None,
+                branch=clean_branch if clean_branch else None,
             )
             msg = f"Sucesso! {len(saved_commits)} commits encontrados e persistidos no PostgreSQL (Execução #{history.id})."
             return RedirectResponse(
@@ -208,9 +232,10 @@ def analyze_period(
             )
 
     # Default: Real-time query without saving to database
-    author_param = f"&author={author.strip()}" if author else ""
+    author_param = f"&author={quote_plus(author.strip())}" if author else ""
+    branch_param = f"&branch={quote_plus(clean_branch)}" if clean_branch else ""
     return RedirectResponse(
-        url=f"/?start_date={start_date}&end_date={end_date}&repo_path={clean_path}{author_param}",
+        url=f"/?start_date={start_date}&end_date={end_date}&repo_path={clean_path}{author_param}{branch_param}",
         status_code=303,
     )
 
@@ -379,12 +404,14 @@ def commits_view(
     end_date: Optional[str] = Query(None),
     q: Optional[str] = Query(None),
     author: Optional[str] = Query(None),
+    branch: Optional[str] = Query(None),
     only_xml: Optional[bool] = Query(False),
     db: Session = Depends(get_db),
 ):
     """Render commits table querying Git directly in real-time with lazy-loading support."""
     active_repo = settings.DEFAULT_REPO_PATH
     author_filter = author.strip() if author and author.strip() else (settings.GIT_AUTHOR_NAME or None)
+    clean_branch = branch.strip() if branch else ""
 
     s_dt = None
     e_dt = None
@@ -402,13 +429,23 @@ def commits_view(
     commits = []
     has_more = False
 
+    active_branch = ""
+    local_branches = []
+    remote_branches = []
+
     if Path(active_repo).exists():
+        branch_info = GitService.get_branches(active_repo)
+        active_branch = branch_info.get("active", "")
+        local_branches = branch_info.get("local", [])
+        remote_branches = branch_info.get("remote", [])
+
         try:
             from app.models.commit import CommitItem
             raw_commits, has_more = GitService.get_commits_paged(
                 repo_path=active_repo,
                 author=author_filter,
                 q=q,
+                branch=clean_branch if clean_branch else None,
                 start_date=s_dt,
                 end_date=e_dt,
                 only_xml=bool(only_xml),
@@ -450,6 +487,10 @@ def commits_view(
             "filter_end_date": end_date or "",
             "filter_query": q or "",
             "filter_author": author if author is not None else (settings.GIT_AUTHOR_NAME or ""),
+            "selected_branch": clean_branch,
+            "active_branch": active_branch,
+            "local_branches": local_branches,
+            "remote_branches": remote_branches,
             "only_xml": only_xml,
             "xml_commits_count": xml_commits_count,
             "total_xml_files": total_xml_files,
@@ -467,6 +508,7 @@ def api_commits_git_paged(
     limit: int = Query(20, ge=1, le=100),
     q: Optional[str] = Query(None),
     author: Optional[str] = Query(None),
+    branch: Optional[str] = Query(None),
     start_date: Optional[str] = Query(None),
     end_date: Optional[str] = Query(None),
     only_xml: bool = Query(False),
@@ -475,6 +517,7 @@ def api_commits_git_paged(
     """API endpoint to lazy-load commits directly from Git."""
     active_repo = settings.DEFAULT_REPO_PATH
     author_filter = author.strip() if author and author.strip() else (settings.GIT_AUTHOR_NAME or None)
+    clean_branch = branch.strip() if branch else ""
 
     s_dt = None
     e_dt = None
@@ -495,6 +538,7 @@ def api_commits_git_paged(
             repo_path=active_repo,
             author=author_filter,
             q=q,
+            branch=clean_branch if clean_branch else None,
             start_date=s_dt,
             end_date=e_dt,
             only_xml=only_xml,
@@ -698,3 +742,202 @@ def export_pdf(execution_id: Optional[int] = None, db: Session = Depends(get_db)
         filename=filepath.name,
         media_type="application/pdf",
     )
+
+
+# -----------------------------------------------------------------------------
+# Teams & Meetings Routes (Fase 2)
+# -----------------------------------------------------------------------------
+
+@router.get("/meetings", response_class=HTMLResponse)
+def meetings_view(
+    request: Request,
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
+    search: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+):
+    """Render meetings and Teams ad-hoc calls dashboard."""
+    start_dt = None
+    end_dt = None
+    if start_date:
+        try:
+            start_dt = datetime.fromisoformat(start_date)
+        except Exception:
+            pass
+    if end_date:
+        try:
+            end_dt = datetime.fromisoformat(end_date).replace(hour=23, minute=59, second=59)
+        except Exception:
+            pass
+
+    meetings = MeetingService.get_meetings(db, start_date=start_dt, end_date=end_dt, search=search, status=status)
+
+    total_seconds = sum(MeetingService.parse_duration_to_seconds(m.duration) for m in meetings)
+    total_duration_str = MeetingService.format_seconds_to_duration(total_seconds)
+
+    total_meetings = len(meetings)
+    total_created = sum(1 for m in meetings if m.status == "criado")
+    total_pending = total_meetings - total_created
+
+    return templates.TemplateResponse(
+        request=request,
+        name="meetings.html",
+        context={
+            "active_page": "meetings",
+            "meetings": meetings,
+            "total_meetings": total_meetings,
+            "total_pending": total_pending,
+            "total_created": total_created,
+            "total_duration_str": total_duration_str,
+            "filter_start_date": start_date or "",
+            "filter_end_date": end_date or "",
+            "filter_search": search or "",
+            "filter_status": status or "",
+            "author_name": settings.GIT_AUTHOR_NAME,
+        },
+    )
+
+
+@router.post("/api/meetings/import-teams-calls")
+async def api_import_teams_calls(
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """API endpoint to receive calls scraped by Teams Bookmarklet from teams.microsoft.com."""
+    try:
+        body = await request.json()
+        calls = body.get("calls", [])
+        if not calls:
+            return JSONResponse(status_code=400, content={"success": False, "message": "Nenhuma chamada recebida no payload."})
+
+        created, updated = MeetingService.import_teams_calls(db, calls)
+        return JSONResponse(
+            status_code=200,
+            content={
+                "success": True,
+                "count": created + updated,
+                "created": created,
+                "updated": updated,
+                "message": f"Sucesso! {created} novas chamadas salvas e {updated} atualizadas.",
+            },
+        )
+    except Exception as exc:
+        logger.error(f"[TEAMS IMPORT ERROR] {exc}")
+        return JSONResponse(status_code=500, content={"success": False, "message": str(exc)})
+
+
+@router.post("/api/meetings/create-manual")
+async def api_create_meeting_manual(
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Manually register an ad-hoc call or meeting."""
+    try:
+        body = await request.json()
+        contact = body.get("contact_name", "Colega TJCE").strip()
+        call_type = body.get("call_type", "efetuada").strip()
+        duration = body.get("duration", "30m").strip()
+        date_str = body.get("date_str", "").strip()
+        title = body.get("title", f"Alinhamento com {contact}").strip()
+
+        calls = [{
+            "contact_name": contact,
+            "title": title,
+            "call_type": call_type,
+            "duration": duration,
+            "start_time": date_str,
+        }]
+        created, updated = MeetingService.import_teams_calls(db, calls)
+        return JSONResponse(status_code=200, content={"success": True, "message": "Chamada registrada com sucesso!"})
+    except Exception as exc:
+        return JSONResponse(status_code=500, content={"success": False, "message": str(exc)})
+
+
+@router.post("/api/meetings/simulate-test-calls")
+def api_simulate_test_calls(db: Session = Depends(get_db)):
+    """Seed 3 realistic sample calls for immediate testing."""
+    now = datetime.now()
+    sample_calls = [
+        {
+            "contact_name": "Lucas Oliveira (Dev PJe)",
+            "title": "Alinhamento técnico sobre Fluxos e Transições XML",
+            "call_type": "efetuada",
+            "duration": "35m 10s",
+            "start_time": (now - timedelta(hours=2)).isoformat(),
+        },
+        {
+            "contact_name": "Mariana Souza (QA / Testes)",
+            "title": "Pareamento para validação de evidência de deploy",
+            "call_type": "recebida",
+            "duration": "24m 45s",
+            "start_time": (now - timedelta(hours=5)).isoformat(),
+        },
+        {
+            "contact_name": "Equipe PJe TJCE",
+            "title": "Reunião de alinhamento de sustentação e correções",
+            "call_type": "reuniao",
+            "duration": "50m 00s",
+            "start_time": (now - timedelta(days=1, hours=3)).isoformat(),
+        },
+    ]
+    created, updated = MeetingService.import_teams_calls(db, sample_calls)
+    return JSONResponse(status_code=200, content={"success": True, "count": created, "message": f"{created} chamadas de teste geradas com sucesso!"})
+
+
+@router.post("/api/meetings/create-ic")
+async def api_create_meeting_ic(
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Create a Redmine IC for one or multiple meetings/calls."""
+    try:
+        body = await request.json()
+        meeting_ids = body.get("meeting_ids", [])
+        title = body.get("title", "Alinhamento técnico de desenvolvimento").strip()
+        activity_type = body.get("activity_type", "Gestão - Participação em reunião, exceto reunião de levantamento de requisitos")
+        complexity = body.get("complexity", "Baixa")
+        dry_run = bool(body.get("dry_run", False))
+
+        if not meeting_ids:
+            return JSONResponse(status_code=400, content={"success": False, "message": "Nenhuma reunião selecionada."})
+
+        success, issue_url, issue_id, logs = MeetingService.create_ic_for_meetings(
+            db=db,
+            meeting_ids=meeting_ids,
+            title=title,
+            activity_type=activity_type,
+            complexity=complexity,
+            dry_run=dry_run,
+        )
+
+        return JSONResponse(
+            status_code=200 if success else 500,
+            content={
+                "success": success,
+                "dry_run": dry_run,
+                "issue_id": issue_id,
+                "issue_url": issue_url,
+                "logs": logs,
+                "message": f"Tarefa #{issue_id} criada com sucesso no Redmine!" if success and not dry_run else ("Simulação concluída com 100% de sucesso!" if success else "Falha ao processar tarefa no Redmine."),
+            }
+        )
+    except Exception as exc:
+        logger.error(f"[MEETING IC ERROR] {exc}")
+        return JSONResponse(status_code=500, content={"success": False, "message": str(exc), "logs": [str(exc)]})
+
+
+@router.post("/api/meetings/delete")
+async def api_delete_meetings(
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Delete selected meetings or clear all."""
+    body = await request.json()
+    meeting_ids = body.get("meeting_ids", [])
+    if meeting_ids:
+        db.query(Meeting).filter(Meeting.id.in_(meeting_ids)).delete(synchronize_session=False)
+    else:
+        db.query(Meeting).delete()
+    db.commit()
+    return JSONResponse(status_code=200, content={"success": True, "message": "Chamadas removidas com sucesso."})
