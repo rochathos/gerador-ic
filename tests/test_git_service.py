@@ -59,47 +59,24 @@ def test_get_commits_period():
     assert len(first["hash"]) == 40
 
 
-def test_execute_analysis_and_persistence(db_session):
-    """Test the full analysis execution pipeline and DB persistence."""
-    now = datetime.now(timezone.utc)
-    start_date = now - timedelta(days=1)
-    end_date = now + timedelta(days=1)
+def test_xml_files_metrics():
+    """Test detection and counting of XML file edits and line modifications via get_commits."""
+    from app.models.commit import CommitItem
 
-    history, saved_commits = GitService.execute_analysis(
-        db=db_session,
-        repo_path=settings.BASE_DIR,
-        start_date=start_date,
-        end_date=end_date,
-        author=None,
-        notes="Teste automatizado via pytest",
-    )
-
-    assert history.id is not None
-    assert history.status == "concluido"
-    assert history.total_commits > 0
-    assert len(saved_commits) == history.total_commits
-
-    # Verify query directly in database
-    db_history = db_session.get(ExecutionHistory, history.id)
-    assert db_history is not None
-    assert len(db_history.commits) == history.total_commits
-
-
-def test_xml_files_metrics(db_session):
-    """Test detection and counting of XML file edits and line modifications."""
     now = datetime.now(timezone.utc)
     start_date = now - timedelta(days=7)
     end_date = now + timedelta(days=1)
 
-    history, saved_commits = GitService.execute_analysis(
-        db=db_session,
+    raw_commits = GitService.get_commits(
         repo_path=settings.BASE_DIR,
         start_date=start_date,
         end_date=end_date,
         author=settings.GIT_AUTHOR_NAME or None,
+        analyze_xml=True,
     )
 
-    xml_commits = [c for c in saved_commits if c.has_xml_changes]
+    commits = [CommitItem(c) for c in raw_commits]
+    xml_commits = [c for c in commits if c.has_xml_changes]
     assert len(xml_commits) >= 2
 
     # Check that XML metrics are properly extracted
@@ -511,6 +488,41 @@ def test_analyze_commit_xml_tags_new_rules():
     assert result["modified"]["action"] == 1
     assert result["modified"]["variable"] == 1
     assert result["added"]["transition"] == 1
+
+
+def test_get_branches_caching():
+    """Test that get_branches caches results in memory and honors force_refresh and clear_branches_cache."""
+    GitService.clear_branches_cache()
+    repo_path = Path(settings.BASE_DIR).resolve()
+    cache_key = str(repo_path)
+
+    assert cache_key not in GitService._BRANCHES_CACHE
+
+    # First call fills the cache
+    res1 = GitService.get_branches(repo_path)
+    assert isinstance(res1, dict)
+    assert "active" in res1
+    assert "local" in res1
+    assert "remote" in res1
+    assert cache_key in GitService._BRANCHES_CACHE
+    initial_timestamp = GitService._BRANCHES_CACHE[cache_key]["timestamp"]
+
+    # Second call uses the cached result (same timestamp)
+    res2 = GitService.get_branches(repo_path)
+    assert res2 == res1
+    assert GitService._BRANCHES_CACHE[cache_key]["timestamp"] == initial_timestamp
+
+    # Force refresh updates the timestamp
+    import time
+    time.sleep(0.01)
+    res3 = GitService.get_branches(repo_path, force_refresh=True)
+    assert res3 == res1
+    assert GitService._BRANCHES_CACHE[cache_key]["timestamp"] >= initial_timestamp
+
+    # Clear cache removes it
+    GitService.clear_branches_cache(repo_path)
+    assert cache_key not in GitService._BRANCHES_CACHE
+
 
 
 

@@ -119,7 +119,7 @@ def home_view(
                 commits = [CommitItem(c) for c in raw_commits]
                 is_live_query = True
                 branch_msg = f" na branch '{selected_branch}'" if selected_branch else " em todas as branches"
-                alert_message = alert_message or f"Consulta realizada diretamente no Git: {len(commits)} commits encontrados{branch_msg} (nenhum dado salvo no banco)."
+                alert_message = alert_message or f"Consulta realizada diretamente no Git: {len(commits)} commits encontrados{branch_msg}."
                 alert_type = "info"
             else:
                 alert_message = msg
@@ -167,7 +167,7 @@ def home_view(
             ci.is_saved = check_is_commit_saved(ci.hash, ci.short_hash, saved_commit_hashes)
 
     # Fetch metric totals
-    total_commits = len(commits) if is_live_query else (db.execute(select(func.count(Commit.id))).scalar() or 0)
+    total_commits = len(commits)
     total_meetings = db.execute(select(func.count(Meeting.id))).scalar() or 0
     total_suggested_ics = (
         db.execute(select(func.count(CatalogItem.id)).where(CatalogItem.status.in_(["salvo", "sugerido"]))).scalar() or 0
@@ -211,10 +211,9 @@ def analyze_period(
     repo_path: str = Form(...),
     author: Optional[str] = Form(None),
     branch: Optional[str] = Form(None),
-    save_to_db: Optional[bool] = Form(False),
     db: Session = Depends(get_db),
 ):
-    """Handle period search. By default queries Git without writing to DB."""
+    """Handle period search in real-time without saving commits to DB."""
     try:
         start_dt = datetime.fromisoformat(start_date)
         end_dt = datetime.fromisoformat(end_date)
@@ -235,31 +234,6 @@ def analyze_period(
         )
 
     clean_branch = branch.strip() if branch else ""
-
-    # If save_to_db was explicitly requested
-    if save_to_db:
-        try:
-            history, saved_commits = GitService.execute_analysis(
-                db=db,
-                repo_path=clean_path,
-                start_date=start_dt,
-                end_date=end_dt,
-                author=author.strip() if author else None,
-                branch=clean_branch if clean_branch else None,
-            )
-            msg = f"Sucesso! {len(saved_commits)} commits encontrados e persistidos no PostgreSQL (Execução #{history.id})."
-            return RedirectResponse(
-                url=f"/?alert_message={msg}&alert_type=success",
-                status_code=303,
-            )
-        except Exception as exc:
-            logger.error(f"Erro durante execução da análise: {exc}")
-            return RedirectResponse(
-                url=f"/?alert_message=Erro+ao+executar+análise:+{str(exc)}&alert_type=danger",
-                status_code=303,
-            )
-
-    # Default: Real-time query without saving to database
     author_param = f"&author={quote_plus(author.strip())}" if author else ""
     branch_param = f"&branch={quote_plus(clean_branch)}" if clean_branch else ""
     return RedirectResponse(
@@ -602,13 +576,14 @@ def commits_view(
 @router.get("/api/git/branches")
 def api_git_branches(
     repo_path: Optional[str] = Query(None),
+    refresh: bool = Query(False),
 ):
     """API endpoint to get list of active, local, and remote branches for autocomplete."""
     active_repo = repo_path.strip() if repo_path and repo_path.strip() else settings.DEFAULT_REPO_PATH
     if not Path(active_repo).exists():
         return JSONResponse({"success": False, "message": "Repositório não encontrado", "active": "", "local": [], "remote": []})
 
-    branch_info = GitService.get_branches(active_repo)
+    branch_info = GitService.get_branches(active_repo, force_refresh=refresh)
     return JSONResponse({
         "success": True,
         "active": branch_info.get("active", ""),
@@ -706,6 +681,7 @@ def api_commits_inspect(
 
         ci = CommitItem(commit_data)
         c_dict = ci.to_dict()
+        c_dict["xml_analyzed"] = True
         matching_item = None
         for si in saved_items:
             if si.commit_hash and (clean_hash.lower().startswith(si.commit_hash.lower()) or si.commit_hash.lower().startswith(clean_hash.lower())):

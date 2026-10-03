@@ -195,19 +195,11 @@
         </div>
 
         <div class="row g-3 align-items-center mb-3">
-          <div class="col-12 col-md-8">
+          <div class="col-12">
             <label for="repo_path" class="form-label text-muted small fw-semibold">Caminho do Repositório Git Local</label>
             <div class="input-group">
               <span class="input-group-text bg-dark border-secondary text-muted"><i class="bi bi-folder2-open"></i></span>
               <input type="text" class="form-control form-control-custom" id="repo_path" name="repo_path" value="{{ repo_path_val }}" placeholder="Ex: D:\Projetos\meu-projeto" required>
-            </div>
-          </div>
-          <div class="col-12 col-md-4 pt-md-4">
-            <div class="form-check form-switch mb-0">
-              <input class="form-check-input" type="checkbox" role="switch" id="save_to_db" name="save_to_db" value="true">
-              <label class="form-check-label text-muted small fw-semibold" for="save_to_db">
-                <i class="bi bi-database text-info me-1"></i> Salvar consulta no PostgreSQL
-              </label>
             </div>
           </div>
         </div>
@@ -240,15 +232,6 @@
           <h5 class="fw-bold mb-1 d-flex align-items-center gap-2">
             <i class="bi bi-git text-primary"></i> Commits Encontrados
             <span class="badge bg-primary rounded-pill small">{{ commits|length }}</span>
-            {% if is_live_query %}
-            <span class="badge bg-info-subtle text-info border border-info-subtle small fw-normal">
-              <i class="bi bi-broadcast me-1"></i> Tempo Real (Não salvo no banco)
-            </span>
-            {% else %}
-            <span class="badge bg-success-subtle text-success border border-success-subtle small fw-normal">
-              <i class="bi bi-database-check me-1"></i> PostgreSQL
-            </span>
-            {% endif %}
           </h5>
           <p class="text-muted small mb-0">Cada commit gera um Item de Catálogo (IC) individual pronto para envio ao Redmine.</p>
         </div>

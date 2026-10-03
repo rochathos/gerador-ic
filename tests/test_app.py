@@ -50,7 +50,7 @@ def test_analyze_endpoint():
     end_str = (now + timedelta(days=1)).strftime("%Y-%m-%dT%H:%M")
 
     author_param = settings.GIT_AUTHOR_NAME or ""
-    # 1. Live query without save_to_db (default)
+    # Live query without saving to db (default)
     response_live = client.post(
         "/analyze",
         data={
@@ -64,20 +64,6 @@ def test_analyze_endpoint():
     assert response_live.status_code == 303
     assert "start_date=" in response_live.headers["location"]
 
-    # 2. Query with save_to_db = true
-    response_save = client.post(
-        "/analyze",
-        data={
-            "start_date": start_str,
-            "end_date": end_str,
-            "repo_path": str(settings.BASE_DIR),
-            "author": author_param,
-            "save_to_db": "true",
-        },
-        follow_redirects=False,
-    )
-    assert response_save.status_code == 303
-    assert "alert_type=success" in response_save.headers["location"]
 
 
 def test_create_single_ic_endpoint():

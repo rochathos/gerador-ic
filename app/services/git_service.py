@@ -2,14 +2,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
 import re
+import time
 import git
 from git.exc import InvalidGitRepositoryError, NoSuchPathError
-from sqlalchemy.orm import Session
-from sqlalchemy import select
-
 from app.core.logger import logger
-from app.models.commit import Commit
-from app.models.execution_history import ExecutionHistory
 
 
 class GitService:
@@ -353,10 +349,28 @@ class GitService:
         return None
 
 
+    _BRANCHES_CACHE: Dict[str, Dict[str, Any]] = {}
+    _BRANCHES_CACHE_TTL: int = 300  # 5 minutos
+
     @classmethod
-    def get_branches(cls, repo_path: str | Path) -> Dict[str, Any]:
-        """Return active branch, list of local branches, and list of remote branches."""
+    def clear_branches_cache(cls, repo_path: Optional[str | Path] = None) -> None:
+        """Clear cached branches for a specific repository or all repositories."""
+        if repo_path:
+            cls._BRANCHES_CACHE.pop(str(Path(repo_path).resolve()), None)
+        else:
+            cls._BRANCHES_CACHE.clear()
+
+    @classmethod
+    def get_branches(cls, repo_path: str | Path, force_refresh: bool = False) -> Dict[str, Any]:
+        """Return active branch, list of local branches, and list of remote branches with in-memory TTL caching."""
         path = Path(repo_path).resolve()
+        cache_key = str(path)
+
+        if not force_refresh and cache_key in cls._BRANCHES_CACHE:
+            cached = cls._BRANCHES_CACHE[cache_key]
+            if time.time() - cached.get("timestamp", 0) < cls._BRANCHES_CACHE_TTL:
+                return cached.get("data", {"active": "", "local": [], "remote": []})
+
         is_valid, _ = cls.validate_repository(path)
         if not is_valid:
             return {"active": "", "local": [], "remote": []}
@@ -386,11 +400,16 @@ class GitService:
                 except Exception:
                     pass
 
-            return {
+            result = {
                 "active": active,
                 "local": sorted(list(local_set), key=str.lower),
                 "remote": sorted(list(remote_set), key=str.lower),
             }
+            cls._BRANCHES_CACHE[cache_key] = {
+                "timestamp": time.time(),
+                "data": result,
+            }
+            return result
         except Exception as exc:
             logger.warning(f"Erro ao listar branches do repositório {path}: {exc}")
             return {"active": "", "local": [], "remote": []}
@@ -501,6 +520,7 @@ class GitService:
         end_date: Optional[datetime] = None,
         author: Optional[str] = None,
         branch: Optional[str] = None,
+        analyze_xml: bool = False,
     ) -> List[Dict[str, Any]]:
         """Fetch commits in the specified period, optionally filtered by author and branch."""
         path = Path(repo_path).resolve()
@@ -564,13 +584,13 @@ class GitService:
                 # Get changed files with diff metrics (insertions, deletions, lines) using -M rename detection
                 files_changed = cls.get_commit_files(repo, commit.hexsha)
 
-                # Check for XML changes and analyze tags using icf.sh rules
+                # Check for XML changes and analyze tags using icf.sh rules (lazy-loaded if analyze_xml is False)
                 has_xml = any(
                     f.get("is_xml") or cls.decode_git_path(str(f.get("path", ""))).lower().endswith(".xml")
                     for f in files_changed
                     if isinstance(f, dict)
                 )
-                xml_analysis = cls.analyze_commit_xml_tags(repo, commit.hexsha) if has_xml else {
+                xml_analysis = cls.analyze_commit_xml_tags(repo, commit.hexsha) if (has_xml and analyze_xml) else {
                     "added": {},
                     "removed": {},
                     "total_added": 0,
@@ -663,6 +683,7 @@ class GitService:
         only_xml: bool = False,
         skip: int = 0,
         limit: int = 20,
+        analyze_xml: bool = False,
     ) -> Tuple[List[Dict[str, Any]], bool]:
         """Fetch a page of commits directly from Git with lazy-loading support without saving to database."""
         path = Path(repo_path).resolve()
@@ -748,7 +769,7 @@ class GitService:
                 break
 
             has_xml = any(f.get("is_xml") for f in files_changed)
-            xml_analysis = cls.analyze_commit_xml_tags(repo, commit.hexsha) if has_xml else {
+            xml_analysis = cls.analyze_commit_xml_tags(repo, commit.hexsha) if (has_xml and analyze_xml) else {
                 "added": {},
                 "removed": {},
                 "total_added": 0,
@@ -777,129 +798,3 @@ class GitService:
 
         return matched_commits, has_more
 
-    @classmethod
-    def save_commits(
-        cls,
-        db: Session,
-        commits_data: List[Dict[str, Any]],
-        execution_id: Optional[int] = None,
-    ) -> List[Commit]:
-        """Persist retrieved commits into the PostgreSQL database."""
-        saved_records: List[Commit] = []
-        try:
-            for item in commits_data:
-                # Check if commit hash already exists
-                stmt = select(Commit).where(Commit.hash == item["hash"])
-                existing = db.execute(stmt).scalar_one_or_none()
-
-                if existing:
-                    # Update fields and associate with execution if provided
-                    existing.execution_id = execution_id or existing.execution_id
-                    existing.author = item["author"]
-                    existing.message = item["message"]
-                    existing.commit_date = item["commit_date"]
-                    existing.files_changed = item["files_changed"]
-                    existing.repo_name = item.get("repo_name")
-                    existing.repo_path = item.get("repo_path")
-                    if item.get("branch"):
-                        existing.branch = item["branch"]
-                    if item.get("commit_url"):
-                        existing.commit_url = item["commit_url"]
-                    if item.get("xml_tags_metrics") is not None:
-                        existing.xml_tags_metrics = item["xml_tags_metrics"]
-                    if item.get("ic_count") is not None:
-                        existing.ic_count = item["ic_count"]
-                    saved_records.append(existing)
-                else:
-                    new_commit = Commit(
-                        hash=item["hash"],
-                        author=item["author"],
-                        message=item["message"],
-                        commit_date=item["commit_date"],
-                        files_changed=item["files_changed"],
-                        repo_name=item.get("repo_name"),
-                        repo_path=item.get("repo_path"),
-                        branch=item.get("branch"),
-                        commit_url=item.get("commit_url"),
-                        xml_tags_metrics=item.get("xml_tags_metrics"),
-                        ic_count=item.get("ic_count", 0),
-                        execution_id=execution_id,
-                    )
-                    db.add(new_commit)
-                    saved_records.append(new_commit)
-
-            db.commit()
-            for rec in saved_records:
-                db.refresh(rec)
-
-            logger.info(f"{len(saved_records)} commits salvos/atualizados com sucesso no PostgreSQL.")
-            return saved_records
-        except Exception as exc:
-            db.rollback()
-            logger.error(f"Erro ao persistir commits no banco de dados: {exc}")
-            raise
-
-    @classmethod
-    def execute_analysis(
-        cls,
-        db: Session,
-        repo_path: str | Path,
-        start_date: datetime,
-        end_date: datetime,
-        author: Optional[str] = None,
-        branch: Optional[str] = None,
-        notes: Optional[str] = None,
-    ) -> Tuple[ExecutionHistory, List[Commit]]:
-        """Run complete extraction pipeline: record history, fetch commits, and save to DB."""
-        path = Path(repo_path).resolve()
-        logger.info(f"Iniciando ciclo de execução de análise para o período {start_date} até {end_date} (branch: {branch or 'ALL'})")
-
-        # 1. Create Execution History record
-        history = ExecutionHistory(
-            start_date=start_date,
-            end_date=end_date,
-            repo_path=str(path),
-            total_commits=0,
-            total_meetings=0,
-            total_catalog_items=0,
-            status="processando",
-            notes=notes or (f"Branch: {branch}" if branch else "Todas as Branches"),
-        )
-        db.add(history)
-        db.commit()
-        db.refresh(history)
-
-        try:
-            # 2. Fetch commits from Git
-            commits_data = cls.get_commits(
-                repo_path=path,
-                start_date=start_date,
-                end_date=end_date,
-                author=author,
-                branch=branch,
-            )
-
-            # 3. Save to database
-            saved_commits = cls.save_commits(
-                db=db,
-                commits_data=commits_data,
-                execution_id=history.id,
-            )
-
-            # 4. Update history totals
-            history.total_commits = len(saved_commits)
-            history.status = "concluido"
-            db.commit()
-            db.refresh(history)
-
-            logger.info(
-                f"Execução #{history.id} concluída com sucesso: {history.total_commits} commits registrados."
-            )
-            return history, saved_commits
-
-        except Exception as exc:
-            history.status = "erro"
-            history.notes = f"Falha na execução: {str(exc)}"
-            db.commit()
-            logger.error(f"Execução #{history.id} finalizou com erro: {exc}")
-            raise

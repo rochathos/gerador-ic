@@ -51,16 +51,31 @@ async function openCreateICByHash(commitHash) {
     }
   }
 
-  if (!commit) {
+  const hasXml = commit && (commit.has_xml_changes || commit.xml_files_count > 0 || (Array.isArray(commit.files_changed) && commit.files_changed.some(f => (typeof f === 'object' ? f.is_xml : String(f).toLowerCase().endsWith('.xml')))));
+  const needsInspect = !commit || (hasXml && !commit.xml_analyzed);
+
+  if (needsInspect) {
+    const overlay = document.getElementById("loading-overlay");
+    const overlaySub = document.getElementById("loading-overlay-subtitle");
+    if (overlay) {
+      if (overlaySub) overlaySub.textContent = "Calculando tags XML do commit em tempo real...";
+      overlay.classList.add("active");
+    }
+
     try {
       const res = await fetch(`/api/commits/inspect/${encodeURIComponent(commitHash)}`);
       const data = await res.json();
       if (data.success && data.commit) {
         commit = data.commit;
+        commit.xml_analyzed = true;
         window.COMMITS_STORE[commit.hash] = commit;
       }
     } catch (err) {
       console.error("Erro ao inspecionar commit:", err);
+    } finally {
+      if (overlay) {
+        overlay.classList.remove("active");
+      }
     }
   }
 
@@ -89,16 +104,31 @@ async function viewFilesByHash(commitHash) {
     }
   }
 
-  if (!commit || !commit.xml_tags_metrics) {
+  const hasXml = commit && (commit.has_xml_changes || commit.xml_files_count > 0 || (Array.isArray(commit.files_changed) && commit.files_changed.some(f => (typeof f === 'object' ? f.is_xml : String(f).toLowerCase().endsWith('.xml')))));
+  const needsInspect = !commit || (hasXml && !commit.xml_analyzed);
+
+  if (needsInspect) {
+    const overlay = document.getElementById("loading-overlay");
+    const overlaySub = document.getElementById("loading-overlay-subtitle");
+    if (overlay) {
+      if (overlaySub) overlaySub.textContent = "Carregando arquivos e métricas do commit...";
+      overlay.classList.add("active");
+    }
+
     try {
       const res = await fetch(`/api/commits/inspect/${encodeURIComponent(commitHash)}`);
       const data = await res.json();
       if (data.success && data.commit) {
         commit = data.commit;
+        commit.xml_analyzed = true;
         window.COMMITS_STORE[commit.hash] = commit;
       }
     } catch (err) {
       console.error("Erro ao inspecionar commit para arquivos:", err);
+    } finally {
+      if (overlay) {
+        overlay.classList.remove("active");
+      }
     }
   }
 
@@ -209,17 +239,12 @@ function setupClipboardCopy() {
 function setupSearchForm() {
   const form = document.getElementById("search-form");
   const overlay = document.getElementById("loading-overlay");
-  const saveToDbCheck = document.getElementById("save_to_db");
   const subtitle = document.getElementById("loading-overlay-subtitle");
 
   if (form && overlay) {
     form.addEventListener("submit", () => {
       if (subtitle) {
-        if (saveToDbCheck && saveToDbCheck.checked) {
-          subtitle.textContent = "Buscando dados no Git e persistindo no PostgreSQL...";
-        } else {
-          subtitle.textContent = "Consultando commits no Git em tempo real...";
-        }
+        subtitle.textContent = "Consultando commits no Git em tempo real...";
       }
       overlay.classList.add("active");
     });
