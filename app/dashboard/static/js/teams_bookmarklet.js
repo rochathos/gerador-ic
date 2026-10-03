@@ -6,11 +6,10 @@
 (function () {
   const SERVER_URL = "http://localhost:8000/api/meetings/import-teams-calls";
 
-  // Remove existing widget if already injected
+  // Remove widget anterior se já estiver na tela
   const oldWidget = document.getElementById("pa-teams-extractor-widget");
   if (oldWidget) oldWidget.remove();
 
-  // Helper to create element with styles and text
   function el(tag, style, text) {
     const element = document.createElement(tag);
     if (style) element.style.cssText = style;
@@ -18,28 +17,199 @@
     return element;
   }
 
-  // Create UI overlay container
+  // Parser robusto de duração (suporta horas, minutos, segundos e 0s)
+  function parseDurationString(str) {
+    if (!str) return null;
+    const clean = str.trim();
+    if (!clean) return null;
+
+    let h = 0, m = 0, s = 0;
+    let found = false;
+
+    const hm = clean.match(/(\d+)\s*(?:horas?|hours?|hrs?|h)\b/i);
+    const mm = clean.match(/(\d+)\s*(?:minutos?|minutes?|mins?|m)\b/i);
+    const sm = clean.match(/(\d+)\s*(?:segundos?|seconds?|secs?|seg|s)\b/i);
+
+    if (hm) { h = parseInt(hm[1], 10); found = true; }
+    if (mm) { m = parseInt(mm[1], 10); found = true; }
+    if (sm) { s = parseInt(sm[1], 10); found = true; }
+
+    if (found) {
+      if (h === 0 && m === 0 && s === 0) return "0s";
+      const parts = [];
+      if (h > 0) parts.push(`${h}h`);
+      if (m > 0) parts.push(`${m}m`);
+      if (s > 0 && h === 0) parts.push(`${s}s`);
+      return parts.length > 0 ? parts.join(" ") : (s > 0 ? `${s}s` : "0s");
+    }
+
+    const digMatch = clean.match(/^(?:(\d{1,2}):)?(\d{1,2}):(\d{2})$/);
+    if (digMatch) {
+      const digH = digMatch[1] ? parseInt(digMatch[1], 10) : 0;
+      const digM = parseInt(digMatch[2], 10);
+      const digS = parseInt(digMatch[3], 10);
+      if (digH === 0 && digM === 0 && digS === 0) return "0s";
+      const parts = [];
+      if (digH > 0) parts.push(`${digH}h`);
+      if (digM > 0) parts.push(`${digM}m`);
+      if (digS > 0 && digH === 0) parts.push(`${digS}s`);
+      return parts.length > 0 ? parts.join(" ") : (digS > 0 ? `${digS}s` : "0s");
+    }
+
+    return null;
+  }
+
+  // Extração de duração
+  function extractDuration(rowEl, label, innerText) {
+    if (rowEl && rowEl.querySelectorAll) {
+      const cells = rowEl.querySelectorAll('[role="gridcell"], td, span, div');
+      for (const cell of cells) {
+        const text = (cell.innerText || cell.textContent || "").trim();
+        if (!text || text.length > 35) continue;
+        if (/hoje|ontem|segunda|terça|quarta|quinta|sexta|sábado|domingo|\/202\d/i.test(text)) continue;
+        if (/^[012]?\d:[0-5]\d(?:\s*(?:am|pm))?$/i.test(text)) continue;
+
+        const dur = parseDurationString(text);
+        if (dur) return dur;
+      }
+    }
+
+    if (label) {
+      const durLabelMatch = label.match(/(?:Dura[çc][ãa]o|Duration)(?: da chamada)?(?: of call)?(?: de)?[:\s]*([^,;\n]+)/i);
+      if (durLabelMatch) {
+        const dur = parseDurationString(durLabelMatch[1]);
+        if (dur) return dur;
+      }
+      const dur = parseDurationString(label);
+      if (dur) return dur;
+    }
+
+    if (innerText) {
+      const lines = innerText.split("\n").map((l) => l.trim()).filter(Boolean);
+      for (const line of lines) {
+        if (/hoje|ontem|segunda|terça|quarta|quinta|sexta|sábado|domingo|\/202\d/i.test(line)) continue;
+        if (/^[012]?\d:[0-5]\d(?:\s*(?:am|pm))?$/i.test(line)) continue;
+        const dur = parseDurationString(line);
+        if (dur) return dur;
+      }
+    }
+
+    // Se nenhuma duração numérica existir, é 0s (não inventa 15m)
+    return "0s";
+  }
+
+  function parseCallItem(rowEl) {
+    const fullText = (rowEl.innerText || "") + " " + (rowEl.getAttribute("aria-label") || "");
+    
+    // Descarta chamadas que não conectaram / canceladas / perdidas
+    if (/perdid|missed|não atendida|cancelad|sem resposta|recusad|ocupado|declined|unanswered/i.test(fullText)) {
+      return null;
+    }
+
+    let label = rowEl.getAttribute("aria-label") || "";
+    if (!label) {
+      const sub = rowEl.querySelector('[aria-label]');
+      if (sub) label = sub.getAttribute("aria-label") || "";
+    }
+    const innerText = rowEl.innerText || "";
+
+    let callType = "efetuada";
+    if (/entrada|recebid|incoming/i.test(label) || /entrada|recebid|incoming/i.test(innerText)) {
+      callType = "recebida";
+    }
+
+    let contactName = "";
+    if (label) {
+      const nameMatch = label.match(/^([^,]+?)(?:,\s*(?:entrada|sa[íi]da|recebida|efetuada|incoming|outgoing)|\s*,)/i);
+      if (nameMatch) contactName = nameMatch[1].trim();
+    }
+    if (!contactName || contactName.length < 2 || /chamada|entrada|sa[íi]da/i.test(contactName)) {
+      const lines = innerText.split("\n").map((l) => l.trim()).filter(Boolean);
+      for (const line of lines) {
+        if (line.length >= 2 && !line.includes(":") && !/^\d/.test(line) && !/chamada|entrada|saída|hoje|ontem|duração/i.test(line)) {
+          contactName = line;
+          break;
+        }
+      }
+    }
+    if (!contactName || contactName.length < 2) contactName = "Colega Teams";
+
+    let dateStr = "Hoje";
+    const dateMatch = label.match(/(?:data\/hora|date\/time)(?: da chamada)?(?: é)?\s*([^,]+)/i);
+    if (dateMatch) {
+      dateStr = dateMatch[1].trim();
+    } else {
+      const lines = innerText.split("\n").map((l) => l.trim()).filter(Boolean);
+      for (const line of lines) {
+        if (/hoje|ontem|\d{1,2}\/\d{1,2}|\d{1,2}\s+de\s+[a-zç]+/i.test(line)) {
+          dateStr = line;
+          break;
+        }
+      }
+    }
+    const timeMatch = innerText.match(/\b([01]?\d|2[0-3]):[0-5]\d\b/);
+    if (timeMatch && !dateStr.includes(":")) {
+      dateStr += ` às ${timeMatch[0]}`;
+    }
+
+    const duration = extractDuration(rowEl, label, innerText);
+
+    // Se não durou nada (0s), descarta para não gerar IC indevido no Redmine
+    if (duration === "0s") {
+      return null;
+    }
+
+    return {
+      contact_name: contactName,
+      title: `Alinhamento com ${contactName}`,
+      call_type: callType,
+      duration: duration,
+      date_str: dateStr
+    };
+  }
+
+  function extractCalls() {
+    const rawCandidates = Array.from(
+      document.querySelectorAll(
+        '[data-tid="calls-history-list"] [role="row"], [data-tid="calls-history-list"] [role="listitem"], [data-tid*="call-history-item"], [class*="call-history-item"], [class*="callRow"], [role="row"], [role="listitem"]'
+      )
+    );
+
+    const topLevelRows = rawCandidates.filter((el, idx, arr) => {
+      return !arr.some((other) => other !== el && other.contains(el));
+    });
+
+    const callMap = new Map();
+
+    topLevelRows.forEach((row) => {
+      const parsed = parseCallItem(row);
+      if (parsed && parsed.contact_name) {
+        const dedupeKey = `${parsed.contact_name.toLowerCase()}_${parsed.date_str.toLowerCase()}`;
+        const existing = callMap.get(dedupeKey);
+
+        if (!existing) {
+          callMap.set(dedupeKey, parsed);
+        } else {
+          if (existing.duration === "0s" && parsed.duration !== "0s") {
+            callMap.set(dedupeKey, parsed);
+          }
+        }
+      }
+    });
+
+    return Array.from(callMap.values());
+  }
+
+  // Interface Flutuante segura (100% appendChild e textContent, sem innerHTML)
   const widget = el("div", `
-    position: fixed;
-    bottom: 24px;
-    right: 24px;
-    width: 420px;
-    max-height: 520px;
-    background: #0f172a;
-    color: #f8fafc;
-    border: 1px solid #334155;
-    border-radius: 12px;
-    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.7), 0 10px 10px -5px rgba(0, 0, 0, 0.4);
-    z-index: 9999999;
+    position: fixed; bottom: 24px; right: 24px; width: 420px; max-height: 520px;
+    background: #0f172a; color: #f8fafc; border: 1px solid #334155; border-radius: 12px;
+    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.7); z-index: 9999999;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    font-size: 13px;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
+    font-size: 13px; display: flex; flex-direction: column; overflow: hidden;
   `);
   widget.id = "pa-teams-extractor-widget";
 
-  // Header
   const header = el("div", "background: #1e293b; padding: 12px 16px; border-bottom: 1px solid #334155; display: flex; justify-content: space-between; align-items: center;");
   const titleBox = el("div", "display: flex; align-items: center; gap: 8px; font-weight: 600; color: #38bdf8;");
   const iconSpan = el("span", "", "📞");
@@ -53,7 +223,6 @@
   header.appendChild(closeBtn);
   widget.appendChild(header);
 
-  // Body
   const body = el("div", "padding: 16px; overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 12px;");
   const statusBox = el("div", "font-size: 13px; color: #cbd5e1; line-height: 1.4;");
   const listBox = el("div", "display: flex; flex-direction: column; gap: 8px; max-height: 240px; overflow-y: auto;");
@@ -61,14 +230,11 @@
   body.appendChild(listBox);
   widget.appendChild(body);
 
-  // Footer
   const footer = el("div", "background: #1e293b; padding: 12px 16px; border-top: 1px solid #334155; display: flex; justify-content: space-between; align-items: center; gap: 8px;");
   const summarySpan = el("span", "color: #94a3b8; font-size: 12px;", "0 chamadas");
-  
   const actionsBox = el("div", "display: flex; gap: 8px; align-items: center;");
   const copyBtn = el("button", "background: #475569; color: #fff; border: none; padding: 6px 12px; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 12px; display: none;", "📋 Copiar JSON");
   const sendBtn = el("button", "background: #2563eb; color: #fff; border: none; padding: 6px 14px; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 12px;", "Enviar para o Sistema");
-
   actionsBox.appendChild(copyBtn);
   actionsBox.appendChild(sendBtn);
   footer.appendChild(summarySpan);
@@ -77,149 +243,12 @@
 
   document.body.appendChild(widget);
 
-  // Parse a call from an aria-label or DOM row
-  function parseCallItem(el) {
-    let label = el.getAttribute("aria-label") || "";
-    if (!label || !label.includes("Dura")) {
-      const sub = el.querySelector('[aria-label*="Dura"], [aria-label*="chamada"], [aria-label*="Chamada"]');
-      if (sub) label = sub.getAttribute("aria-label") || "";
-    }
-
-    const innerText = el.innerText || "";
-
-    // Strategy 1: Accurate Portuguese aria-label parsing
-    // Example: "Helio Matheus Sales Silva, Entrada, Duração da chamada de 1 minuto  44 segundos, A data/hora da chamada é Ontem"
-    if (label && (label.includes("Dura") || label.includes("data/hora") || label.includes("Entrada") || label.includes("Saída"))) {
-      if (/perdid|missed/i.test(label) || /perdid|missed/i.test(innerText)) return null;
-
-      // 1. Call Type
-      let callType = "efetuada";
-      if (/entrada|recebid|incoming/i.test(label)) {
-        callType = "recebida";
-      }
-
-      // 2. Contact Name
-      let contactName = "";
-      const nameMatch = label.match(/^([^,]+?)(?:,\s*(?:entrada|sa[íi]da|recebida|efetuada)|\s*,)/i);
-      if (nameMatch) {
-        contactName = nameMatch[1].trim();
-      } else {
-        contactName = label.split(",")[0].trim();
-      }
-      if (!contactName || contactName.length < 2) {
-        contactName = "Colega Teams";
-      }
-
-      // 3. Duration: "Duração da chamada de 1 minuto  44 segundos"
-      let duration = "15m";
-      const durMatch = label.match(/Dura[çc][ãa]o(?: da chamada)?(?: de)?\s*([^,]+)/i);
-      if (durMatch) {
-        const rawDur = durMatch[1].trim();
-        let h = 0, m = 0, s = 0;
-        const hm = rawDur.match(/(\d+)\s*(?:hora|horas|h)/i);
-        const mm = rawDur.match(/(\d+)\s*(?:minuto|minutos|min|m)/i);
-        const sm = rawDur.match(/(\d+)\s*(?:segundo|segundos|seg|s)/i);
-        if (hm) h = parseInt(hm[1], 10);
-        if (mm) m = parseInt(mm[1], 10);
-        if (sm) s = parseInt(sm[1], 10);
-        const parts = [];
-        if (h > 0) parts.push(`${h}h`);
-        if (m > 0) parts.push(`${m}m`);
-        if (s > 0 && h === 0) parts.push(`${s}s`);
-        duration = parts.length > 0 ? parts.join(" ") : rawDur;
-      }
-
-      // 4. Date: "A data/hora da chamada é Ontem"
-      let dateStr = "Hoje";
-      const dateMatch = label.match(/data\/hora(?: da chamada)?(?: é)?\s*([^,]+)/i);
-      if (dateMatch) {
-        dateStr = dateMatch[1].trim();
-      }
-
-      // If innerText contains time of day (e.g. 14:35), attach it
-      const timeMatch = innerText.match(/\b([01]?\d|2[0-3]):[0-5]\d\b/);
-      if (timeMatch && !dateStr.includes(":")) {
-        dateStr += ` às ${timeMatch[0]}`;
-      }
-
-      return {
-        contact_name: contactName,
-        title: `Alinhamento com ${contactName}`,
-        call_type: callType,
-        duration: duration,
-        date_str: dateStr
-      };
-    }
-
-    // Strategy 2: Fallback text parsing if no aria-label
-    if (innerText && innerText.length > 5) {
-      if (/perdid|missed/i.test(innerText)) return null;
-
-      let callType = /recebid|incoming/i.test(innerText) ? "recebida" : "efetuada";
-      const lines = innerText.split("\n").map(l => l.trim()).filter(Boolean);
-      let contactName = lines[0] || "Colega Teams";
-      if (contactName.includes(":") || /^\d/.test(contactName) || /chamada/i.test(contactName)) {
-        contactName = lines[1] || contactName;
-      }
-
-      let duration = "15m";
-      const durMatch = innerText.match(/(\d+)\s*h(?:\s*(\d+)\s*m)?|(\d+)\s*m(?:in)?(?:\s*(\d+)\s*s)?|(\d{1,2}:\d{2}(?::\d{2})?)/i);
-      if (durMatch && durMatch[0]) {
-        duration = durMatch[0].trim();
-      }
-
-      let dateStr = "Hoje";
-      for (const line of lines) {
-        if (/hoje|ontem|\d{1,2}\/\d{1,2}|\d{1,2}\s+de\s+[a-zç]+/i.test(line)) {
-          dateStr = line;
-          break;
-        }
-      }
-
-      return {
-        contact_name: contactName,
-        title: `Alinhamento com ${contactName}`,
-        call_type: callType,
-        duration: duration,
-        date_str: dateStr
-      };
-    }
-
-    return null;
-  }
-
-  // Extraction logic
-  function extractCalls() {
-    const calls = [];
-    const seen = new Set();
-
-    // Query candidate rows and aria-label elements
-    const elements = document.querySelectorAll(
-      '[aria-label*="Dura\u00e7\u00e3o"], [aria-label*="chamada"], [aria-label*="Chamada"], [data-tid="calls-history-list"] [role="row"], [data-tid="calls-history-list"] [role="listitem"], [data-tid*="call-history-item"], [data-tid*="call"], [class*="call-history"], [class*="callRow"], [role="row"], [role="listitem"]'
-    );
-
-    elements.forEach((el) => {
-      const parsed = parseCallItem(el);
-      if (parsed && parsed.contact_name) {
-        const key = `${parsed.contact_name}_${parsed.date_str}_${parsed.duration}`;
-        if (!seen.has(key)) {
-          seen.add(key);
-          calls.push(parsed);
-        }
-      }
-    });
-
-    return calls;
-  }
-
   function render() {
-    while (listBox.firstChild) {
-      listBox.removeChild(listBox.firstChild);
-    }
+    while (listBox.firstChild) listBox.removeChild(listBox.firstChild);
     const calls = extractCalls();
 
     if (calls.length > 0) {
-      statusBox.textContent = `✅ Encontradas ${calls.length} chamadas no histórico do Teams:`;
+      statusBox.textContent = `✅ Encontradas ${calls.length} chamadas válidas (0s descartadas):`;
       statusBox.style.color = "#38bdf8";
       summarySpan.textContent = `${calls.length} chamadas`;
       copyBtn.style.display = "inline-block";
@@ -238,7 +267,6 @@
         listBox.appendChild(row);
       });
 
-      // Copy JSON button
       copyBtn.onclick = async () => {
         try {
           await navigator.clipboard.writeText(JSON.stringify(calls, null, 2));
@@ -250,7 +278,6 @@
         }
       };
 
-      // Send to server
       sendBtn.textContent = "Enviar para o Sistema";
       sendBtn.onclick = async () => {
         sendBtn.disabled = true;

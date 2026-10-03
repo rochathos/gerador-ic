@@ -236,4 +236,44 @@ def test_update_catalog_item_redmine_id():
     client.post(f"/catalog-items/{item_id}/delete")
 
 
+def test_import_teams_calls_17_minutes():
+    """Test importing Teams calls with 17m duration via /api/meetings/import-teams-calls."""
+    from app.services.meeting_service import MeetingService
+
+    # 1. Verify parser directly
+    secs = MeetingService.parse_duration_to_seconds("17m")
+    assert secs == 1020
+    assert MeetingService.format_seconds_to_duration(secs) == "17m"
+
+    secs2 = MeetingService.parse_duration_to_seconds("17 minutos e 30 segundos")
+    assert secs2 == 1050
+    assert MeetingService.format_seconds_to_duration(secs2) == "17m 30s"
+
+    # 2. Test API import
+    payload = {
+        "calls": [
+            {
+                "contact_name": "Colega Teste 17m",
+                "title": "Alinhamento com Colega Teste 17m",
+                "call_type": "efetuada",
+                "duration": "17m",
+                "date_str": "Hoje às 14:00",
+            }
+        ]
+    }
+
+    res = client.post("/api/meetings/import-teams-calls", json=payload)
+    assert res.status_code == 200
+    data = res.json()
+    assert data["success"] is True
+    assert data["count"] >= 1
+
+    # 3. Check meetings page displays 17m
+    meetings_page = client.get("/meetings")
+    assert meetings_page.status_code == 200
+    assert "Colega Teste 17m" in meetings_page.text
+    assert "17m" in meetings_page.text
+
+
+
 
