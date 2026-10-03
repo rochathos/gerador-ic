@@ -89,7 +89,7 @@ async function viewFilesByHash(commitHash) {
     }
   }
 
-  if (!commit) {
+  if (!commit || !commit.xml_tags_metrics) {
     try {
       const res = await fetch(`/api/commits/inspect/${encodeURIComponent(commitHash)}`);
       const data = await res.json();
@@ -103,9 +103,9 @@ async function viewFilesByHash(commitHash) {
   }
 
   if (commit && commit.files_changed) {
-    viewFiles(commitHash, commit.files_changed);
+    viewFiles(commitHash, commit.files_changed, commit);
   } else {
-    viewFiles(commitHash, []);
+    viewFiles(commitHash, [], commit);
   }
 }
 
@@ -229,7 +229,7 @@ function setupSearchForm() {
 /**
  * Open files changed modal
  */
-function viewFiles(commitHash, filesJson) {
+function viewFiles(commitHash, filesJson, commitData) {
   const modalTitle = document.getElementById("filesModalTitle");
   const modalBody = document.getElementById("filesModalBody");
   if (!modalTitle || !modalBody) return;
@@ -243,29 +243,47 @@ function viewFiles(commitHash, filesJson) {
     files = [];
   }
 
+  let commit = commitData || null;
+  if (!commit && window.COMMITS_STORE) {
+    commit = window.COMMITS_STORE[commitHash] || Object.values(window.COMMITS_STORE).find(
+      (c) => (c.hash && c.hash.startsWith(commitHash)) || (c.short_hash && c.short_hash.startsWith(commitHash))
+    ) || null;
+  }
+
+  const rawMetrics = (commit && commit.xml_tags_metrics) || {};
+  const flows = rawMetrics.flows || null;
+  const icTotalAdded = rawMetrics.total_added || 0;
+  const icTotalRemoved = rawMetrics.total_removed || 0;
+  const icTotalModified = rawMetrics.total_modified || 0;
+  const icEffectiveTotal = (commit && commit.ic_count !== undefined)
+    ? commit.ic_count
+    : (rawMetrics.total_ics !== undefined ? rawMetrics.total_ics : (icTotalAdded + icTotalRemoved + icTotalModified));
+
   if (!files || files.length === 0) {
     modalBody.innerHTML = '<p class="text-muted">Nenhum arquivo listado ou alterado.</p>';
   } else {
-    // Check if any XML files exist and sum their stats
+    // Check if any XML files exist
     let xmlCount = 0;
-    let totalXmlIns = 0;
-    let totalXmlDel = 0;
-    let totalXmlLines = 0;
-
     files.forEach(f => {
       const isXml = typeof f === "object" ? f.is_xml : String(f).toLowerCase().endsWith(".xml");
-      if (isXml) {
-        xmlCount++;
-        if (typeof f === "object") {
-          totalXmlIns += (f.insertions || 0);
-          totalXmlDel += (f.deletions || 0);
-          totalXmlLines += (f.lines || 0);
-        }
-      }
+      if (isXml) xmlCount++;
     });
 
     let headerHtml = "";
     if (xmlCount > 0) {
+      const partsBadges = [];
+      if (icTotalAdded > 0) {
+        partsBadges.push(`<span class="badge bg-success-subtle text-success border border-success-subtle px-2 py-1">+${icTotalAdded} adições</span>`);
+      }
+      if (icTotalRemoved > 0) {
+        partsBadges.push(`<span class="badge bg-danger-subtle text-danger border border-danger-subtle px-2 py-1">-${icTotalRemoved} remoções</span>`);
+      }
+      if (icTotalModified > 0) {
+        partsBadges.push(`<span class="badge bg-warning-subtle text-warning border border-warning-subtle px-2 py-1">~${icTotalModified} ajustes</span>`);
+      }
+      const totalBadgeText = `${icEffectiveTotal} IC(s) no total`;
+      partsBadges.push(`<span class="badge bg-warning text-dark fw-bold px-2 py-1">${totalBadgeText}</span>`);
+
       headerHtml = `
         <div class="card-glass p-3 mb-3 border-warning border-opacity-50 bg-warning bg-opacity-10 rounded-3">
           <div class="d-flex flex-wrap align-items-center justify-content-between gap-2">
@@ -276,10 +294,8 @@ function viewFiles(commitHash, filesJson) {
                 <div class="small text-light">${xmlCount} arquivo(s) XML alterado(s) neste commit</div>
               </div>
             </div>
-            <div class="d-flex gap-2">
-              <span class="badge bg-success-subtle text-success border border-success-subtle px-2 py-1">+${totalXmlIns} adições</span>
-              <span class="badge bg-danger-subtle text-danger border border-danger-subtle px-2 py-1">-${totalXmlDel} remoções</span>
-              <span class="badge bg-warning text-dark fw-bold px-2 py-1">${totalXmlLines} edições totais</span>
+            <div class="d-flex flex-wrap gap-2 align-items-center">
+              ${partsBadges.join(" ")}
             </div>
           </div>
         </div>
@@ -295,19 +311,78 @@ function viewFiles(commitHash, filesJson) {
       const del = isObj ? (f.deletions || 0) : 0;
       const lines = isObj ? (f.lines || 0) : 0;
 
+      let rightBadgesHtml = "";
+      let tagPillsHtml = "";
+
+      if (isXml && flows) {
+        const flowData = findFlowMetricsForFile(filePath, flows);
+        if (flowData) {
+          const fAdded = flowData.added || {};
+          const fRemoved = flowData.removed || {};
+          const fModified = flowData.modified || {};
+          const fTotAdd = flowData.total_added || Object.values(fAdded).reduce((a, b) => a + b, 0);
+          const fTotRem = flowData.total_removed || Object.values(fRemoved).reduce((a, b) => a + b, 0);
+          const fTotMod = flowData.total_modified || Object.values(fModified).reduce((a, b) => a + b, 0);
+          const fTotalICs = flowData.total_ics !== undefined ? flowData.total_ics : (fTotAdd + fTotRem + fTotMod);
+
+          const icBadges = [];
+          if (fTotAdd > 0) {
+            icBadges.push(`<span class="badge bg-success-subtle text-success border border-success-subtle px-2 py-1" title="Tags Adicionadas">+${fTotAdd}</span>`);
+          }
+          if (fTotRem > 0) {
+            icBadges.push(`<span class="badge bg-danger-subtle text-danger border border-danger-subtle px-2 py-1" title="Tags Removidas">-${fTotRem}</span>`);
+          }
+          if (fTotMod > 0) {
+            icBadges.push(`<span class="badge bg-warning-subtle text-warning border border-warning-subtle px-2 py-1" title="Tags Ajustadas">~${fTotMod}</span>`);
+          }
+          icBadges.push(`<span class="badge bg-warning text-dark fw-bold px-2 py-1" title="Itens de Catálogo">${fTotalICs} IC(s)</span>`);
+
+          if (ins > 0 || del > 0) {
+            icBadges.push(`<span class="badge bg-dark text-muted border border-secondary border-opacity-50 px-2 py-1" title="Linhas Git: +${ins} / -${del} (${lines} linhas)">${lines} lin</span>`);
+          }
+
+          rightBadgesHtml = icBadges.join(" ");
+
+          const pills = [];
+          Object.entries(fAdded).forEach(([t, c]) => {
+            pills.push(`<span class="badge bg-success bg-opacity-25 text-success border border-success-subtle py-0 px-1" style="font-size:0.65rem;" title="Adicionada">+&lt;${escapeHtml(t)}&gt;: ${c}</span>`);
+          });
+          Object.entries(fRemoved).forEach(([t, c]) => {
+            pills.push(`<span class="badge bg-danger bg-opacity-25 text-danger border border-danger-subtle py-0 px-1" style="font-size:0.65rem;" title="Removida">-&lt;${escapeHtml(t)}&gt;: ${c}</span>`);
+          });
+          Object.entries(fModified).forEach(([t, c]) => {
+            pills.push(`<span class="badge bg-warning bg-opacity-25 text-warning border border-warning-subtle py-0 px-1" style="font-size:0.65rem;" title="Ajustada / Modificada">~&lt;${escapeHtml(t)}&gt;: ${c}</span>`);
+          });
+          if (pills.length > 0) {
+            tagPillsHtml = `<div class="d-flex align-items-center gap-1 flex-wrap mt-1">${pills.join(" ")}</div>`;
+          }
+        }
+      }
+
+      if (!rightBadgesHtml) {
+        if (isObj && (ins > 0 || del > 0 || lines > 0)) {
+          rightBadgesHtml = `
+            <span class="badge bg-success-subtle text-success border border-success-subtle px-2 py-1" title="Linhas inseridas">+${ins}</span>
+            <span class="badge bg-danger-subtle text-danger border border-danger-subtle px-2 py-1" title="Linhas deletadas">-${del}</span>
+            <span class="badge bg-secondary-subtle text-light border border-secondary px-2 py-1" title="Total de edições">${lines} edições</span>
+          `;
+        } else {
+          rightBadgesHtml = '<span class="text-muted small">Modificado</span>';
+        }
+      }
+
       listHtml += `
         <li class="list-group-item bg-dark bg-opacity-50 rounded-2 border ${isXml ? 'border-warning border-opacity-50' : 'border-secondary border-opacity-25'} p-2 d-flex flex-wrap align-items-center justify-content-between gap-2">
-          <div class="d-flex align-items-center gap-2 text-truncate" style="max-width: 65%;">
-            ${isXml ? '<span class="badge bg-warning text-dark fw-bold" style="font-size:0.7rem;"><i class="bi bi-filetype-xml"></i> XML</span>' : '<i class="bi bi-file-earmark-code text-info"></i>'}
-            ${isObj && f.is_rename ? `<span class="badge bg-info-subtle text-info border border-info-subtle" style="font-size:0.68rem;" title="Renomeado de: ${escapeHtml(f.old_path || '')}"><i class="bi bi-arrow-repeat me-1"></i>Renomeado</span>` : ''}
-            <span class="font-monospace small ${isXml ? 'text-warning fw-semibold' : 'text-light'} text-truncate" title="${filePath}">${filePath}</span>
+          <div class="d-flex flex-column text-truncate" style="max-width: 65%;">
+            <div class="d-flex align-items-center gap-2 text-truncate">
+              ${isXml ? '<span class="badge bg-warning text-dark fw-bold" style="font-size:0.7rem;"><i class="bi bi-filetype-xml"></i> XML</span>' : '<i class="bi bi-file-earmark-code text-info"></i>'}
+              ${isObj && f.is_rename ? `<span class="badge bg-info-subtle text-info border border-info-subtle" style="font-size:0.68rem;" title="Renomeado de: ${escapeHtml(f.old_path || '')}"><i class="bi bi-arrow-repeat me-1"></i>Renomeado</span>` : ''}
+              <span class="font-monospace small ${isXml ? 'text-warning fw-semibold' : 'text-light'} text-truncate" title="${filePath}">${filePath}</span>
+            </div>
+            ${tagPillsHtml}
           </div>
           <div class="d-flex align-items-center gap-1 font-monospace" style="font-size: 0.8rem;">
-            ${isObj && (ins > 0 || del > 0 || lines > 0) ? `
-              <span class="badge bg-success-subtle text-success border border-success-subtle px-2 py-1" title="Linhas inseridas">+${ins}</span>
-              <span class="badge bg-danger-subtle text-danger border border-danger-subtle px-2 py-1" title="Linhas deletadas">-${del}</span>
-              <span class="badge bg-secondary-subtle text-light border border-secondary px-2 py-1" title="Total de edições">${lines} edições</span>
-            ` : '<span class="text-muted small">Modificado</span>'}
+            ${rightBadgesHtml}
           </div>
         </li>
       `;
@@ -382,9 +457,8 @@ function openCreateICModal(commitData) {
   const descEl = document.getElementById("icInputDesc");
   const alertEl = document.getElementById("icFeedbackAlert");
   const alertText = document.getElementById("icFeedbackText");
-  const saveBtn = document.getElementById("btnSaveICToDB");
 
-  // Reset feedback alert and save button
+  // Reset feedback alert
   if (alertEl) {
     alertEl.classList.add("d-none");
     alertEl.classList.remove("alert-danger");
@@ -393,16 +467,13 @@ function openCreateICModal(commitData) {
   if (alertText) {
     alertText.textContent = "";
   }
-  if (saveBtn) {
-    if (commit.is_saved) {
-      saveBtn.disabled = true;
-      saveBtn.innerHTML = '<i class="bi bi-check-circle-fill"></i> Salvo no Banco';
-      saveBtn.className = "btn btn-success d-flex align-items-center gap-1";
-    } else {
-      saveBtn.disabled = false;
-      saveBtn.innerHTML = '<i class="bi bi-database-add"></i> Salvar no Banco';
-      saveBtn.className = "btn btn-outline-success d-flex align-items-center gap-1";
-    }
+
+  // Reset simulation button
+  const simBtn = document.getElementById("btnSimulateICInRedmine");
+  if (simBtn) {
+    simBtn.disabled = false;
+    simBtn.className = "btn btn-outline-warning d-flex align-items-center gap-1";
+    simBtn.innerHTML = '<i class="bi bi-shield-check"></i> Testar no Redmine (Simulação)';
   }
 
   // Reset Redmine button & logs
@@ -429,6 +500,23 @@ function openCreateICModal(commitData) {
   if (redmineLogsStatus) {
     redmineLogsStatus.className = "badge bg-secondary";
     redmineLogsStatus.textContent = "Aguardando";
+  }
+
+  // Populate Redmine ID field and link if available
+  const redmineIdEl = document.getElementById("icInputRedmineId");
+  const redmineLinkEl = document.getElementById("icLinkRedmine");
+  const curRedmineId = commit.redmine_id ? String(commit.redmine_id).replace(/^#/, "").trim() : "";
+  if (redmineIdEl) {
+    redmineIdEl.value = curRedmineId;
+    redmineIdEl.oninput = onICInputChanged;
+  }
+  if (redmineLinkEl) {
+    if (curRedmineId) {
+      redmineLinkEl.href = `https://redmine.tjce.jus.br/issues/${curRedmineId}`;
+      redmineLinkEl.classList.remove("d-none");
+    } else {
+      redmineLinkEl.classList.add("d-none");
+    }
   }
 
   // Populate badge & branch
@@ -815,6 +903,13 @@ function openCreateICModal(commitData) {
     quantityEl.value = effectiveTotalICs > 0 ? effectiveTotalICs : 1;
   }
 
+  if (titleEl) {
+    titleEl.oninput = onICInputChanged;
+  }
+  if (descEl) {
+    descEl.oninput = onICInputChanged;
+  }
+
   const modal = new bootstrap.Modal(modalEl);
   modal.show();
 }
@@ -872,91 +967,60 @@ async function copyFullICToRedmine(btn) {
 }
 
 /**
- * Save the created IC into PostgreSQL database via /api/create-ic
+ * Update the status badge in the commits table
  */
-async function saveICToDatabase(btn) {
-  const titleEl = document.getElementById("icInputTitle");
-  const descEl = document.getElementById("icInputDesc");
-  const alertEl = document.getElementById("icFeedbackAlert");
-  const alertText = document.getElementById("icFeedbackText");
-
-  const title = titleEl ? titleEl.value.trim() : "";
-  const description = descEl ? descEl.value.trim() : "";
-
-  if (!title) {
-    if (alertEl && alertText) {
-      alertEl.classList.remove("d-none", "alert-success");
-      alertEl.classList.add("alert-danger");
-      alertText.textContent = "Por favor, informe o título do Item de Catálogo.";
+function updateCommitStatusCell(hash, isSaved) {
+  if (!hash) return;
+  const cleanHash = hash.trim().toLowerCase();
+  let cell = document.getElementById(`status-cell-${hash}`) || document.getElementById(`status-cell-${cleanHash}`);
+  if (!cell && cleanHash.length >= 7) {
+    cell = document.getElementById(`status-cell-${cleanHash.substring(0, 7)}`);
+  }
+  if (!cell) {
+    const allCells = document.querySelectorAll('[id^="status-cell-"]');
+    for (const c of allCells) {
+      const cellHash = c.id.replace("status-cell-", "").trim().toLowerCase();
+      if (cellHash && (cleanHash.startsWith(cellHash) || cellHash.startsWith(cleanHash))) {
+        cell = c;
+        break;
+      }
     }
-    return;
   }
-
-  if (btn) {
-    btn.disabled = true;
-    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span> Salvando...';
-  }
-
-  try {
-    const res = await fetch("/api/create-ic", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        title: title,
-        description: description,
-        status: "sugerido",
-        commit_hash: currentModalCommit ? (currentModalCommit.hash || currentModalCommit.short_hash) : "",
-      }),
-    });
-
-    const data = await res.json();
-    if (data.success) {
-      if (btn) {
-        btn.className = "btn btn-success d-flex align-items-center gap-1";
-        btn.innerHTML = '<i class="bi bi-check-circle-fill"></i> Salvo no Banco';
-      }
-      if (alertEl && alertText) {
-        alertEl.classList.remove("d-none", "alert-danger");
-        alertEl.classList.add("alert-success");
-        alertText.textContent = `Item de Catálogo #${data.id} salvo com sucesso no banco de dados!`;
-      }
-      if (currentModalCommit && currentModalCommit.hash) {
-        currentModalCommit.is_saved = true;
-        const cell = document.getElementById(`status-cell-${currentModalCommit.hash}`);
-        if (cell) {
-          cell.innerHTML = `
-            <span class="badge bg-success-subtle text-success border border-success-subtle" title="Item de Catálogo já salvo no PostgreSQL">
-              <i class="bi bi-check-circle-fill me-1"></i>Salvo
-            </span>
-          `;
-        }
-      }
+  if (cell) {
+    if (isSaved) {
+      cell.innerHTML = `
+        <span class="badge bg-success-subtle text-success border border-success-subtle" title="Item de Catálogo já salvo no PostgreSQL">
+          <i class="bi bi-check-circle-fill me-1"></i>Salvo
+        </span>
+      `;
     } else {
-      if (btn) {
-        btn.disabled = false;
-        btn.innerHTML = '<i class="bi bi-database-add"></i> Tentar Novamente';
-      }
-      if (alertEl && alertText) {
-        alertEl.classList.remove("d-none", "alert-success");
-        alertEl.classList.add("alert-danger");
-        alertText.textContent = `Erro ao salvar: ${data.message}`;
-      }
-    }
-  } catch (err) {
-    console.error("Erro na requisição /api/create-ic:", err);
-    if (btn) {
-      btn.disabled = false;
-      btn.innerHTML = '<i class="bi bi-database-add"></i> Tentar Novamente';
-    }
-    if (alertEl && alertText) {
-      alertEl.classList.remove("d-none", "alert-success");
-      alertEl.classList.add("alert-danger");
-      alertText.textContent = `Erro de comunicação com o servidor: ${err.message}`;
+      cell.innerHTML = `
+        <span class="badge bg-secondary-subtle text-muted border border-secondary-subtle" title="Não salvo no banco de dados">
+          Não Salvo
+        </span>
+      `;
     }
   }
 }
+
+/**
+ * Handle input changes in IC title, description, or redmine ID
+ */
+function onICInputChanged() {
+  const redmineIdEl = document.getElementById("icInputRedmineId");
+  const redmineLinkEl = document.getElementById("icLinkRedmine");
+  if (redmineIdEl && redmineLinkEl) {
+    const rId = redmineIdEl.value.trim().replace(/^#/, "");
+    if (rId) {
+      redmineLinkEl.href = `https://redmine.tjce.jus.br/issues/${rId}`;
+      redmineLinkEl.classList.remove("d-none");
+    } else {
+      redmineLinkEl.classList.add("d-none");
+    }
+  }
+}
+
+
 
 /**
  * Create IC directly in Redmine via official REST API with live step-by-step logs
@@ -1046,23 +1110,56 @@ async function createICDirectlyInRedmine(btn, isDryRun = false) {
     }
 
     if (data.success) {
+      // Set Redmine ID and link for both simulation and real creation
+      const redmineIdEl = document.getElementById("icInputRedmineId");
+      if (redmineIdEl && data.issue_id) {
+        redmineIdEl.value = data.issue_id;
+      }
+      const redmineLinkEl = document.getElementById("icLinkRedmine");
+      if (redmineLinkEl && data.issue_id) {
+        redmineLinkEl.href = data.issue_url || `https://redmine.tjce.jus.br/issues/${data.issue_id}`;
+        redmineLinkEl.classList.remove("d-none");
+      }
+
+      // Update currentModalCommit state
+      if (currentModalCommit) {
+        currentModalCommit.is_saved = true;
+        currentModalCommit.redmine_id = data.issue_id;
+        if (window.COMMITS_STORE && currentModalCommit.hash && window.COMMITS_STORE[currentModalCommit.hash]) {
+          window.COMMITS_STORE[currentModalCommit.hash].is_saved = true;
+          window.COMMITS_STORE[currentModalCommit.hash].redmine_id = data.issue_id;
+        }
+      }
+
       if (data.dry_run) {
         if (logsStatus) {
           logsStatus.className = "badge bg-info text-dark";
-          logsStatus.textContent = "Simulação Aprovada";
+          logsStatus.textContent = "Simulação Aprovada & Salva";
         }
 
         if (btn) {
           btn.disabled = false;
-          btn.innerHTML = '<i class="bi bi-shield-check"></i> Testar Novamente (Simulação)';
+          btn.className = "btn btn-outline-success d-flex align-items-center gap-1";
+          btn.innerHTML = `<i class="bi bi-check2-circle"></i> Simulado (#${data.issue_id})`;
         }
 
         if (alertEl && alertText) {
           alertEl.classList.remove("d-none", "alert-danger");
           alertEl.classList.add("alert-success");
           alertText.innerHTML = `
-            <span><i class="bi bi-check-circle-fill text-success me-1"></i><b>Simulação Concluída com 100% de Sucesso!</b> Todas as etapas da API (usuário, projeto, tracker e campos customizados) foram aprovadas. <u>Nenhuma tarefa foi criada</u> no Redmine.</span>
+            <span><i class="bi bi-check-circle-fill text-success me-1"></i><b>Simulação Concluída e Salva no Banco!</b> Tarefa simulada <b>#${data.issue_id}</b> registrada no banco de dados com status <i>criado</i> (nenhuma tarefa real foi criada no Redmine).</span>
           `;
+        }
+
+        if (currentModalCommit && currentModalCommit.hash) {
+          const cell = document.getElementById(`status-cell-${currentModalCommit.hash}`);
+          if (cell) {
+            cell.innerHTML = `
+              <span class="badge bg-info-subtle text-info border border-info-subtle font-monospace d-inline-flex align-items-center gap-1" title="IC Simulado salvo no banco (#${data.issue_id})">
+                <i class="bi bi-check-circle-fill"></i> #${data.issue_id} (Simulado)
+              </span>
+            `;
+          }
         }
       } else {
         if (logsStatus) {
@@ -1077,29 +1174,18 @@ async function createICDirectlyInRedmine(btn, isDryRun = false) {
           btn.onclick = () => window.open(data.issue_url, '_blank');
         }
 
-        // Also mark Save to DB button as saved
-        const dbBtn = document.getElementById("btnSaveICToDB");
-        if (dbBtn) {
-          dbBtn.className = "btn btn-success d-flex align-items-center gap-1";
-          dbBtn.innerHTML = '<i class="bi bi-check-circle-fill"></i> Salvo no Banco';
-        }
-
         if (alertEl && alertText) {
           alertEl.classList.remove("d-none", "alert-danger");
           alertEl.classList.add("alert-success");
           alertText.innerHTML = `
-            <span><b>Sucesso!</b> Tarefa <b>#${data.issue_id}</b> criada no Redmine!</span>
+            <span><b>Sucesso!</b> Tarefa <b>#${data.issue_id}</b> criada no Redmine e salva no banco de dados!</span>
             <a href="${data.issue_url}" target="_blank" class="btn btn-sm btn-outline-success ms-2 py-0 px-2 text-decoration-none">
               Abrir Tarefa <i class="bi bi-box-arrow-up-right ms-1"></i>
             </a>
           `;
         }
 
-        // Update currentModalCommit and table row
-        if (currentModalCommit) {
-          currentModalCommit.is_saved = true;
-          currentModalCommit.redmine_id = data.issue_id;
-
+        if (currentModalCommit && currentModalCommit.hash) {
           const cell = document.getElementById(`status-cell-${currentModalCommit.hash}`);
           if (cell) {
             cell.innerHTML = `

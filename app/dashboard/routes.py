@@ -38,6 +38,28 @@ def _get_default_period():
     return start_of_week, end_of_period
 
 
+def check_is_commit_saved(c_hash: Optional[str], c_short_hash: Optional[str], saved_hashes: set) -> bool:
+    """Check if a commit hash matches any saved CatalogItem commit_hash in the database."""
+    if not saved_hashes:
+        return False
+    candidates = []
+    if c_hash:
+        candidates.append(c_hash.strip().lower())
+    if c_short_hash:
+        candidates.append(c_short_hash.strip().lower())
+
+    for cand in candidates:
+        if not cand:
+            continue
+        for sh in saved_hashes:
+            if not sh:
+                continue
+            sh_clean = sh.strip().lower()
+            if cand == sh_clean or cand.startswith(sh_clean) or sh_clean.startswith(cand):
+                return True
+    return False
+
+
 @router.get("/", response_class=HTMLResponse)
 def home_view(
     request: Request,
@@ -137,11 +159,18 @@ def home_view(
             stmt_commits = select(Commit).order_by(desc(Commit.commit_date)).limit(15)
             commits = list(db.execute(stmt_commits).scalars().all())
 
+    # Check saved commits in database
+    saved_stmt = select(CatalogItem.commit_hash).where(CatalogItem.commit_hash.is_not(None))
+    saved_commit_hashes = {h.strip().lower() for h in db.execute(saved_stmt).scalars().all() if h}
+    for ci in commits:
+        if isinstance(ci, CommitItem):
+            ci.is_saved = check_is_commit_saved(ci.hash, ci.short_hash, saved_commit_hashes)
+
     # Fetch metric totals
     total_commits = len(commits) if is_live_query else (db.execute(select(func.count(Commit.id))).scalar() or 0)
     total_meetings = db.execute(select(func.count(Meeting.id))).scalar() or 0
     total_suggested_ics = (
-        db.execute(select(func.count(CatalogItem.id)).where(CatalogItem.status == "sugerido")).scalar() or 0
+        db.execute(select(func.count(CatalogItem.id)).where(CatalogItem.status.in_(["salvo", "sugerido"]))).scalar() or 0
     )
     total_created_ics = (
         db.execute(select(func.count(CatalogItem.id)).where(CatalogItem.status == "criado")).scalar() or 0
@@ -244,21 +273,23 @@ async def create_single_ic(
     request: Request,
     db: Session = Depends(get_db),
 ):
-    """Save an individual Catalog Item (1 IC created for a commit)."""
+    """Save or update an individual Catalog Item (1 IC created for a commit)."""
     try:
         content_type = request.headers.get("content-type", "")
         if "application/json" in content_type:
             payload = await request.json()
             title = payload.get("title", "")
             description = payload.get("description", "")
-            status = payload.get("status", "sugerido")
+            status = payload.get("status", "salvo")
             commit_hash = payload.get("commit_hash", "")
+            redmine_id = payload.get("redmine_id", "")
         else:
             form_data = await request.form()
             title = form_data.get("title", "")
             description = form_data.get("description", "")
-            status = form_data.get("status", "sugerido")
+            status = form_data.get("status", "salvo")
             commit_hash = form_data.get("commit_hash", "")
+            redmine_id = form_data.get("redmine_id", "")
 
         if not title:
             return JSONResponse(
@@ -266,28 +297,98 @@ async def create_single_ic(
                 content={"success": False, "message": "Título do IC é obrigatório."},
             )
 
-        item = CatalogItem(
-            title=str(title).strip(),
-            description=str(description).strip() if description else "",
-            status=str(status) if status else "sugerido",
-            commit_hash=str(commit_hash).strip() if commit_hash else None,
-        )
-        db.add(item)
+        clean_hash = str(commit_hash).strip() if commit_hash else None
+        clean_redmine_id = str(redmine_id).strip().lstrip("#") if redmine_id else None
+
+        # Check if an IC already exists for this commit hash to avoid duplicates
+        existing_item = None
+        if clean_hash:
+            short_prefix = clean_hash[:7].lower()
+            stmt = select(CatalogItem).where(
+                (CatalogItem.commit_hash.ilike(f"{short_prefix}%")) |
+                (CatalogItem.commit_hash == clean_hash)
+            ).order_by(desc(CatalogItem.id)).limit(1)
+            existing_item = db.execute(stmt).scalar_one_or_none()
+
+        if existing_item:
+            existing_item.title = str(title).strip()
+            if description:
+                existing_item.description = str(description).strip()
+            if clean_redmine_id:
+                existing_item.redmine_id = clean_redmine_id
+                existing_item.status = "criado"
+            elif existing_item.status != "criado":
+                existing_item.status = str(status) if status else "salvo"
+            item = existing_item
+        else:
+            final_status = "criado" if clean_redmine_id else (str(status) if status else "salvo")
+            item = CatalogItem(
+                title=str(title).strip(),
+                description=str(description).strip() if description else "",
+                status=final_status,
+                commit_hash=clean_hash,
+                redmine_id=clean_redmine_id,
+            )
+            db.add(item)
+
         db.commit()
         db.refresh(item)
-        logger.info(f"IC individual #{item.id} criado com sucesso: {item.title[:50]}")
+        logger.info(f"IC individual #{item.id} salvo com sucesso: status={item.status} hash={item.commit_hash} redmine_id={item.redmine_id} title={item.title[:50]}")
         return JSONResponse(
             status_code=200,
             content={
                 "success": True,
                 "id": item.id,
                 "title": item.title,
-                "message": f"Item de Catálogo #{item.id} salvo com sucesso no banco de dados!",
+                "status": item.status,
+                "redmine_id": item.redmine_id,
+                "message": f"Item de Catálogo #{item.id} salvo com sucesso no banco de dados com status '{item.status}'!",
             },
         )
     except Exception as exc:
         db.rollback()
         logger.error(f"Erro ao salvar IC: {exc}")
+        return JSONResponse(status_code=500, content={"success": False, "message": str(exc)})
+
+
+@router.post("/api/catalog-items/{item_id}/redmine-id")
+async def api_update_catalog_item_redmine_id(
+    item_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Quickly link or update the Redmine issue ID for a saved Catalog Item."""
+    try:
+        content_type = request.headers.get("content-type", "")
+        if "application/json" in content_type:
+            payload = await request.json()
+            redmine_id = payload.get("redmine_id", "")
+        else:
+            form_data = await request.form()
+            redmine_id = form_data.get("redmine_id", "")
+
+        item = db.get(CatalogItem, item_id)
+        if not item:
+            return JSONResponse(status_code=404, content={"success": False, "message": "Item de Catálogo não encontrado."})
+
+        clean_id = str(redmine_id).strip().lstrip("#") if redmine_id else None
+        item.redmine_id = clean_id
+        if clean_id:
+            item.status = "criado"
+        db.commit()
+        db.refresh(item)
+
+        return JSONResponse({
+            "success": True,
+            "id": item.id,
+            "redmine_id": item.redmine_id,
+            "status": item.status,
+            "redmine_url": f"https://redmine.tjce.jus.br/issues/{item.redmine_id}" if item.redmine_id else None,
+            "message": f"Número do Redmine #{item.redmine_id} vinculado com sucesso!",
+        })
+    except Exception as exc:
+        db.rollback()
+        logger.error(f"Erro ao salvar Redmine ID no IC #{item_id}: {exc}")
         return JSONResponse(status_code=500, content={"success": False, "message": str(exc)})
 
 
@@ -325,24 +426,18 @@ async def api_create_redmine_ic(
             dry_run=dry_run,
         )
 
-        if dry_run and success:
-            logger.info(f"[REDMINE API] [DRY-RUN CONCLUÍDO] Simulação aprovada com êxito para '{title[:50]}...'. Zero tarefas criadas.")
-            return JSONResponse(
-                status_code=200,
-                content={
-                    "success": True,
-                    "dry_run": True,
-                    "message": "Simulação realizada com 100% de sucesso! Todas as validações foram aprovadas e nenhuma tarefa foi criada no Redmine.",
-                    "logs": step_logs,
-                },
-            )
-
         if success and issue_id:
             # Persist or update CatalogItem in PostgreSQL
             item = None
             if commit_hash:
-                stmt = select(CatalogItem).where(CatalogItem.commit_hash == commit_hash)
-                item = db.execute(stmt).scalar_one_or_none()
+                clean_hash = commit_hash.strip().lower()
+                stmt = select(CatalogItem).where(
+                    or_(
+                        func.lower(CatalogItem.commit_hash) == clean_hash,
+                        func.lower(CatalogItem.commit_hash).like(f"{clean_hash}%"),
+                    )
+                )
+                item = db.execute(stmt).scalars().first()
 
             if not item:
                 item = CatalogItem(
@@ -361,16 +456,20 @@ async def api_create_redmine_ic(
 
             db.commit()
             db.refresh(item)
-            logger.info(f"[REDMINE API] Item de Catálogo #{item.id} vinculado à tarefa Redmine #{issue_id} com sucesso.")
+            logger.info(f"[REDMINE API] Item de Catálogo #{item.id} vinculado à tarefa Redmine #{issue_id} com sucesso (dry_run={dry_run}).")
 
             return JSONResponse(
                 status_code=200,
                 content={
                     "success": True,
-                    "dry_run": False,
+                    "dry_run": dry_run,
                     "issue_id": issue_id,
                     "issue_url": issue_url,
-                    "message": f"Tarefa #{issue_id} criada com sucesso no Redmine!",
+                    "message": (
+                        f"Simulação concluída com sucesso! Tarefa simulada #{issue_id} salva no banco de dados."
+                        if dry_run
+                        else f"Tarefa #{issue_id} criada com sucesso no Redmine!"
+                    ),
                     "logs": step_logs,
                     "catalog_item_id": item.id,
                 },
@@ -451,11 +550,11 @@ def commits_view(
                 limit=20,
             )
             saved_stmt = select(CatalogItem.commit_hash).where(CatalogItem.commit_hash.is_not(None))
-            saved_commit_hashes = set(db.execute(saved_stmt).scalars().all())
+            saved_commit_hashes = {h.strip().lower() for h in db.execute(saved_stmt).scalars().all() if h}
 
             for c in raw_commits:
                 ci = CommitItem(c)
-                ci.is_saved = ci.hash in saved_commit_hashes
+                ci.is_saved = check_is_commit_saved(ci.hash, ci.short_hash, saved_commit_hashes)
                 commits.append(ci)
         except Exception as exc:
             logger.error(f"Erro ao buscar commits paginados do Git: {exc}")
@@ -563,13 +662,13 @@ def api_commits_git_paged(
         )
 
         saved_stmt = select(CatalogItem.commit_hash).where(CatalogItem.commit_hash.is_not(None))
-        saved_commit_hashes = set(db.execute(saved_stmt).scalars().all())
+        saved_commit_hashes = {h.strip().lower() for h in db.execute(saved_stmt).scalars().all() if h}
 
         commit_items = []
         for c in raw_commits:
             ci = CommitItem(c)
             c_dict = ci.to_dict()
-            c_dict["is_saved"] = c["hash"] in saved_commit_hashes
+            c_dict["is_saved"] = check_is_commit_saved(c.get("hash"), c.get("short_hash"), saved_commit_hashes)
             commit_items.append(c_dict)
 
         return JSONResponse({
@@ -602,12 +701,22 @@ def api_commits_inspect(
                 content={"success": False, "message": f"Commit '{clean_hash}' não encontrado no repositório local."},
             )
 
-        saved_stmt = select(CatalogItem.id).where(CatalogItem.commit_hash.ilike(f"{clean_hash}%"))
-        is_saved = db.execute(saved_stmt).scalar() is not None
+        saved_stmt = select(CatalogItem).where(CatalogItem.commit_hash.is_not(None))
+        saved_items = list(db.execute(saved_stmt).scalars().all())
 
         ci = CommitItem(commit_data)
         c_dict = ci.to_dict()
-        c_dict["is_saved"] = is_saved
+        matching_item = None
+        for si in saved_items:
+            if si.commit_hash and (clean_hash.lower().startswith(si.commit_hash.lower()) or si.commit_hash.lower().startswith(clean_hash.lower())):
+                matching_item = si
+                break
+
+        c_dict["is_saved"] = matching_item is not None
+        if matching_item:
+            c_dict["catalog_item_id"] = matching_item.id
+            if matching_item.redmine_id:
+                c_dict["redmine_id"] = matching_item.redmine_id
 
         return JSONResponse({"success": True, "commit": c_dict})
     except Exception as exc:
@@ -637,13 +746,21 @@ def catalog_items_view(request: Request, db: Session = Depends(get_db)):
     """Render Catalog Items list."""
     stmt = select(CatalogItem).order_by(desc(CatalogItem.created_at))
     items = list(db.execute(stmt).scalars().all())
+    total_saved = db.execute(select(func.count(CatalogItem.id)).where(CatalogItem.status == "salvo")).scalar() or 0
+    total_redmine = db.execute(select(func.count(CatalogItem.id)).where(CatalogItem.status == "criado")).scalar() or 0
+    total_all = db.execute(select(func.count(CatalogItem.id))).scalar() or 0
 
     return templates.TemplateResponse(
         request=request,
-        name="catalog_items.html",
+        name="history.html",
         context={
             "active_page": "catalog_items",
             "catalog_items": items,
+            "total_all": total_all,
+            "total_saved": total_saved,
+            "total_redmine": total_redmine,
+            "filter_status": "",
+            "filter_q": "",
             "author_name": settings.GIT_AUTHOR_NAME,
         },
     )
@@ -679,27 +796,53 @@ def approve_catalog_item(item_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/catalog-items/{item_id}/delete")
-def delete_catalog_item(item_id: int, db: Session = Depends(get_db)):
+def delete_catalog_item(item_id: int, request: Request, db: Session = Depends(get_db)):
     """Delete a Catalog Item."""
     item = db.get(CatalogItem, item_id)
     if item:
         db.delete(item)
         db.commit()
-    return RedirectResponse(url="/catalog-items", status_code=303)
+    referer = request.headers.get("referer", "/history")
+    redirect_url = referer if ("/catalog-items" in referer or "/history" in referer) else "/history"
+    return RedirectResponse(url=redirect_url, status_code=303)
 
 
 @router.get("/history", response_class=HTMLResponse)
-def history_view(request: Request, db: Session = Depends(get_db)):
-    """Render execution history table."""
-    stmt = select(ExecutionHistory).order_by(desc(ExecutionHistory.created_at))
-    executions = list(db.execute(stmt).scalars().all())
+def history_view(
+    request: Request,
+    status_filter: Optional[str] = Query(None),
+    q: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+):
+    """Render created/saved Catalog Items (ICs) history table."""
+    stmt = select(CatalogItem).order_by(desc(CatalogItem.created_at))
+    if status_filter:
+        stmt = stmt.where(CatalogItem.status == status_filter.strip())
+    if q and q.strip():
+        search_pattern = f"%{q.strip()}%"
+        stmt = stmt.where(
+            (CatalogItem.title.ilike(search_pattern)) |
+            (CatalogItem.commit_hash.ilike(search_pattern)) |
+            (CatalogItem.description.ilike(search_pattern))
+        )
+
+    items = list(db.execute(stmt).scalars().all())
+
+    total_saved = db.execute(select(func.count(CatalogItem.id)).where(CatalogItem.status == "salvo")).scalar() or 0
+    total_redmine = db.execute(select(func.count(CatalogItem.id)).where(CatalogItem.status == "criado")).scalar() or 0
+    total_all = db.execute(select(func.count(CatalogItem.id))).scalar() or 0
 
     return templates.TemplateResponse(
         request=request,
         name="history.html",
         context={
             "active_page": "history",
-            "executions": executions,
+            "catalog_items": items,
+            "total_all": total_all,
+            "total_saved": total_saved,
+            "total_redmine": total_redmine,
+            "filter_status": status_filter or "",
+            "filter_q": q or "",
             "author_name": settings.GIT_AUTHOR_NAME,
         },
     )

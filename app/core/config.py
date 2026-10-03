@@ -41,6 +41,7 @@ class Settings(BaseSettings):
     REDMINE_URL: str = "https://redmine.corporativo.local"
     REDMINE_API_KEY: Optional[str] = None
     REDMINE_PROJECT_ID: Optional[int] = 52
+    REDMINE_TRACKER_ID: Optional[int] = 156
     REDMINE_USERNAME: Optional[str] = None
     REDMINE_PASSWORD: Optional[str] = None
 

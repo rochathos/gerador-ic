@@ -52,13 +52,8 @@
             </a>
           </li>
           <li class="nav-item">
-            <a class="nav-link {% if active_page == 'catalog_items' %}active{% endif %}" href="/catalog-items">
-              <i class="bi bi-card-checklist me-1"></i> Itens de Catálogo (IC)
-            </a>
-          </li>
-          <li class="nav-item">
-            <a class="nav-link {% if active_page == 'history' %}active{% endif %}" href="/history">
-              <i class="bi bi-clock-history me-1"></i> Histórico
+            <a class="nav-link {% if active_page == 'history' or active_page == 'catalog_items' %}active{% endif %}" href="/history">
+              <i class="bi bi-clock-history me-1"></i> Histórico de ICs
             </a>
           </li>
         </ul>
@@ -147,11 +142,13 @@
             <input type="text" class="form-control form-control-custom fw-semibold" id="icInputTitle">
           </div>
 
+          <input type="hidden" id="icInputRedmineId">
+
           <div class="row g-3 mb-3">
             <div class="col-12 col-md-6">
               <label for="icInputComplexity" class="form-label text-muted small fw-bold mb-1 d-flex align-items-center justify-content-between">
-                <span><i class="bi bi-speedometer2 text-warning me-1"></i> [DEVPJE] COMPLEXIDADE:</span>
-                <span class="badge bg-secondary-subtle text-muted fw-normal" style="font-size:0.7rem;">Campo Redmine #456</span>
+                <span><i class="bi bi-speedometer2 text-warning me-1"></i> COMPLEXIDADE:</span>
+                <span class="badge bg-secondary-subtle text-muted fw-normal" style="font-size:0.7rem;">#456</span>
               </label>
               <select class="form-select form-control-custom fw-semibold" id="icInputComplexity">
                 <option value="Baixa" selected>Baixa</option>
@@ -162,8 +159,8 @@
             </div>
             <div class="col-12 col-md-6">
               <label for="icInputQuantity" class="form-label text-muted small fw-bold mb-1 d-flex align-items-center justify-content-between">
-                <span><i class="bi bi-123 text-info me-1"></i> [DEVPJE] - QUANTIDADE (AJUSTES XML):</span>
-                <span class="badge bg-secondary-subtle text-muted fw-normal" style="font-size:0.7rem;">Campo Redmine #457</span>
+                <span><i class="bi bi-123 text-info me-1"></i> QUANTIDADE:</span>
+                <span class="badge bg-secondary-subtle text-muted fw-normal" style="font-size:0.7rem;">#457</span>
               </label>
               <input type="number" min="1" class="form-control form-control-custom fw-semibold font-monospace" id="icInputQuantity" value="1">
             </div>
@@ -197,9 +194,6 @@
           <div class="d-flex flex-wrap gap-2">
             <button type="button" class="btn btn-primary-custom d-flex align-items-center gap-1" onclick="copyFullICToRedmine(this)">
               <i class="bi bi-clipboard-check"></i> Copiar Tudo
-            </button>
-            <button type="button" class="btn btn-outline-success d-flex align-items-center gap-1" id="btnSaveICToDB" onclick="saveICToDatabase(this)">
-              <i class="bi bi-database-add"></i> Salvar no Banco
             </button>
             <button type="button" class="btn btn-outline-warning d-flex align-items-center gap-1" id="btnSimulateICInRedmine" onclick="createICDirectlyInRedmine(this, true)" title="Valida autenticação, projeto, campos e payload sem criar a tarefa">
               <i class="bi bi-shield-check"></i> Testar no Redmine (Simulação)

@@ -1,4 +1,5 @@
 import json
+import random
 from typing import Optional, Tuple, Dict, Any, List
 import httpx
 import urllib3
@@ -96,9 +97,9 @@ class RedmineService:
                 logger.info(formatted)
 
         base_url = settings.REDMINE_URL.rstrip("/")
-        key = api_key or settings.REDMINE_API_KEY
-        proj_id = project_id or settings.REDMINE_PROJECT_ID or 52
-        track_id = tracker_id or settings.REDMINE_TRACKER_ID or 156
+        key = api_key or getattr(settings, "REDMINE_API_KEY", None)
+        proj_id = project_id or getattr(settings, "REDMINE_PROJECT_ID", 52) or 52
+        track_id = tracker_id or getattr(settings, "REDMINE_TRACKER_ID", 156) or 156
 
         # PASSO 1
         mode_label = "SIMULAÇÃO (DRY-RUN)" if dry_run else "CRIAÇÃO OFICIAL"
@@ -113,14 +114,21 @@ class RedmineService:
             with httpx.Client(verify=False, timeout=12.0) as client:
                 r_user = client.get(f"{base_url}/users/current.json", headers=cls.get_headers(key))
                 if r_user.status_code != 200:
-                    log_step(f"[PASSO 2/6] FALHA: Chave de API inválida ou rejeitada pelo servidor (HTTP {r_user.status_code}).", is_error=True)
-                    return False, None, None, step_logs
-                user_info = r_user.json().get("user", {})
-                author_name = f"{user_info.get('firstname', '')} {user_info.get('lastname', '')}".strip()
-                log_step(f"[PASSO 2/6] Autenticado com sucesso como autor: {author_name} (ID: #{user_info.get('id')})")
+                    if dry_run:
+                        log_step(f"[PASSO 2/6] [SIMULAÇÃO] Servidor Redmine respondeu HTTP {r_user.status_code}. Prosseguindo com validação local da simulação...")
+                    else:
+                        log_step(f"[PASSO 2/6] FALHA: Chave de API inválida ou rejeitada pelo servidor (HTTP {r_user.status_code}).", is_error=True)
+                        return False, None, None, step_logs
+                else:
+                    user_info = r_user.json().get("user", {})
+                    author_name = f"{user_info.get('firstname', '')} {user_info.get('lastname', '')}".strip()
+                    log_step(f"[PASSO 2/6] Autenticado com sucesso como autor: {author_name} (ID: #{user_info.get('id')})")
         except Exception as exc:
-            log_step(f"[PASSO 2/6] FALHA: Erro de conexão ao validar usuário: {str(exc)}", is_error=True)
-            return False, None, None, step_logs
+            if dry_run:
+                log_step(f"[PASSO 2/6] [SIMULAÇÃO] Servidor Redmine TJCE indisponível sem VPN ({str(exc)[:50]}). Prosseguindo com validação local da simulação...")
+            else:
+                log_step(f"[PASSO 2/6] FALHA: Erro de conexão ao validar usuário: {str(exc)}", is_error=True)
+                return False, None, None, step_logs
 
         # PASSO 3
         log_step(f"[PASSO 3/6] Validando destino no Redmine: Projeto ID={proj_id} (PJe) e Tracker ID={track_id} (Item Catálogo PJE)...")
@@ -171,13 +179,15 @@ class RedmineService:
 
         # PASSO 5 & 6
         if dry_run:
-            log_step("[PASSO 5/6] [MODO DRY-RUN ATIVO] Validando estrutura, codificação UTF-8 e tamanho do JSON...")
+            log_step("[PASSO 5/6] [MODO SIMULAÇÃO ATIVO] Validando estrutura, codificação UTF-8 e tamanho do JSON...")
             payload_json = json.dumps(payload, ensure_ascii=False)
             payload_bytes = payload_json.encode("utf-8")
             log_step(f"[PASSO 5/6] Payload JSON validado com sucesso! Tamanho: {len(payload_bytes)} bytes.")
-            log_step("[PASSO 6/6] [SUCESSO DO TESTE / DRY-RUN] Todas as etapas foram aprovadas com 100% de êxito!")
-            log_step("[PASSO 6/6] Nenhuma tarefa foi criada no Redmine (Modo Simulação Seguro). A aplicação está pronta para produção.")
-            return True, None, None, step_logs
+            fake_issue_id = str(random.randint(990000, 999999))
+            fake_issue_url = f"{base_url}/issues/{fake_issue_id}"
+            log_step(f"[PASSO 6/6] [SIMULAÇÃO BEM-SUCEDIDA] Número simulado do Redmine gerado: #{fake_issue_id}")
+            log_step(f"[PASSO 6/6] Nenhuma tarefa real foi criada no Redmine. IC pronto para persistência no banco!")
+            return True, fake_issue_url, fake_issue_id, step_logs
 
         endpoint_url = f"{base_url}/issues.json"
         log_step(f"[PASSO 5/6] Enviando requisição HTTP POST para {endpoint_url}...")

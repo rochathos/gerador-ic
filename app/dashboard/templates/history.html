@@ -1,106 +1,225 @@
 {% extends "base.html" %}
 
-{% block title %}Histórico de Execuções - Productivity Assistant{% endblock %}
+{% block title %}Histórico de Itens de Catálogo (IC) - Productivity Assistant{% endblock %}
 
 {% block content %}
 <div class="row g-4 mb-4">
   <div class="col-12 d-flex flex-wrap justify-content-between align-items-center gap-3">
     <div>
       <h2 class="fw-bold mb-1 d-flex align-items-center gap-2">
-        <i class="bi bi-clock-history text-primary"></i> Histórico de Execuções
+        <i class="bi bi-clock-history text-primary"></i> Histórico de Itens de Catálogo (IC)
       </h2>
       <p class="text-muted mb-0">
-        Registro de todas as análises e coletas de dados realizadas no sistema.
+        Histórico de Execuções e Itens de Catálogo (ICs) criados e salvos a partir dos commits analisados.
       </p>
     </div>
-    <div>
+    <div class="d-flex align-items-center gap-2">
+      <a href="/commits" class="btn btn-primary-custom d-flex align-items-center gap-2">
+        <i class="bi bi-git"></i> Consultar Commits para Gerar ICs
+      </a>
       <a href="/" class="btn btn-secondary-custom">
         <i class="bi bi-arrow-left me-1"></i> Voltar ao Painel
       </a>
     </div>
   </div>
 
-  <!-- History Table -->
+  <!-- Metric Summary Cards -->
+  <div class="col-12 col-md-4">
+    <div class="card-glass stat-card">
+      <div class="d-flex justify-content-between align-items-start mb-2">
+        <div>
+          <div class="stat-label">Total de ICs Registrados</div>
+          <div class="stat-value text-light">{{ total_all }}</div>
+        </div>
+        <div class="stat-icon info">
+          <i class="bi bi-card-checklist"></i>
+        </div>
+      </div>
+      <div class="text-muted small">Todos os itens persistidos no banco</div>
+    </div>
+  </div>
+
+  <div class="col-12 col-md-4">
+    <div class="card-glass stat-card">
+      <div class="d-flex justify-content-between align-items-start mb-2">
+        <div>
+          <div class="stat-label">Salvos no Banco</div>
+          <div class="stat-value text-success">{{ total_saved }}</div>
+        </div>
+        <div class="stat-icon success">
+          <i class="bi bi-database-check"></i>
+        </div>
+      </div>
+      <div class="text-muted small">Prontos para envio ao Redmine</div>
+    </div>
+  </div>
+
+  <div class="col-12 col-md-4">
+    <div class="card-glass stat-card">
+      <div class="d-flex justify-content-between align-items-start mb-2">
+        <div>
+          <div class="stat-label">Criados no Redmine</div>
+          <div class="stat-value text-info">{{ total_redmine }}</div>
+        </div>
+        <div class="stat-icon" style="background: rgba(6, 182, 212, 0.15); color: #22d3ee;">
+          <i class="bi bi-cloud-check-fill"></i>
+        </div>
+      </div>
+      <div class="text-muted small">Sincronizados com tarefas ativas</div>
+    </div>
+  </div>
+
+  <!-- Filters & Search -->
+  <div class="col-12">
+    <div class="card-glass p-3">
+      <form method="GET" action="/history" class="row g-2 align-items-center">
+        <div class="col-12 col-md-6 col-lg-5">
+          <div class="input-group">
+            <span class="input-group-text bg-dark border-secondary text-muted">
+              <i class="bi bi-search"></i>
+            </span>
+            <input type="text" name="q" value="{{ filter_q }}" class="form-control form-control-custom" placeholder="Buscar por título, hash, Redmine ID ou descrição...">
+          </div>
+        </div>
+        <div class="col-12 col-md-4 col-lg-3">
+          <select name="status_filter" class="form-select form-control-custom">
+            <option value="" {% if not filter_status %}selected{% endif %}>Todos os Status</option>
+            <option value="salvo" {% if filter_status == 'salvo' %}selected{% endif %}>Salvo no Banco</option>
+            <option value="criado" {% if filter_status == 'criado' %}selected{% endif %}>Criado no Redmine</option>
+          </select>
+        </div>
+        <div class="col-12 col-md-2 d-flex gap-2">
+          <button type="submit" class="btn btn-primary-custom flex-grow-1">
+            <i class="bi bi-filter me-1"></i> Filtrar
+          </button>
+          {% if filter_q or filter_status %}
+          <a href="/history" class="btn btn-secondary-custom" title="Limpar Filtros">
+            <i class="bi bi-x-lg"></i>
+          </a>
+          {% endif %}
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- History of ICs Table -->
   <div class="col-12">
     <div class="card-glass">
-      <div class="p-3 border-bottom border-secondary border-opacity-25 d-flex justify-content-between align-items-center">
-        <span class="text-muted small">Total de execuções salvas: <b class="text-light">{{ executions|length }}</b></span>
+      <div class="p-3 border-bottom border-secondary border-opacity-25 d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <span class="text-muted small">Itens de Catálogo listados: <b class="text-light">{{ catalog_items|length }}</b></span>
+        <div class="d-flex align-items-center gap-2">
+          <a href="/export/excel" class="btn btn-sm btn-outline-success d-flex align-items-center gap-1" title="Baixar Relatório em Excel">
+            <i class="bi bi-file-earmark-excel"></i> Exportar Excel
+          </a>
+        </div>
       </div>
 
       <div class="table-responsive">
-        <table class="table table-custom align-middle">
+        <table class="table table-custom align-middle mb-0">
           <thead>
             <tr>
               <th style="width: 70px;">ID</th>
-              <th style="width: 170px;">Data da Execução</th>
-              <th style="width: 250px;">Período Analisado</th>
-              <th>Repositório</th>
-              <th style="width: 110px;" class="text-center">Commits</th>
-              <th style="width: 110px;" class="text-center">Reuniões</th>
-              <th style="width: 110px;" class="text-center">ICs</th>
-              <th style="width: 130px;" class="text-center">Status</th>
-              <th style="width: 200px;" class="text-end">Exportar</th>
+              <th style="width: 140px;">Data Criação</th>
+              <th style="width: 130px;">Commit</th>
+              <th style="width: 250px;">Título do IC</th>
+              <th style="width: 175px;">Nº Redmine</th>
+              <th>Descrição Gerada</th>
+              <th style="width: 140px;" class="text-center">Status</th>
+              <th style="width: 160px;" class="text-end">Ações</th>
             </tr>
           </thead>
           <tbody>
-            {% if executions %}
-              {% for ex in executions %}
-              <tr>
-                <td class="text-muted small">#{{ ex.id }}</td>
+            {% if catalog_items %}
+              {% for ic in catalog_items %}
+              <tr id="row-ic-{{ ic.id }}">
+                <td class="text-muted small">#{{ ic.id }}</td>
                 <td class="text-muted small">
-                  {{ ex.created_at.strftime("%d/%m/%Y %H:%M") }}
+                  {{ ic.created_at.strftime("%d/%m/%Y %H:%M") }}
                 </td>
                 <td>
-                  <div class="small fw-semibold text-light">
-                    {{ ex.start_date.strftime("%d/%m/%Y %H:%M") }}
+                  {% if ic.commit_hash %}
+                  <div class="d-flex align-items-center gap-1">
+                    <span class="badge-hash font-monospace">{{ ic.commit_hash[:7] }}</span>
+                    <button type="button" class="btn btn-link btn-sm p-0 text-info"
+                            onclick="openCreateICByHash('{{ ic.commit_hash }}')"
+                            title="Inspecionar / Editar IC deste commit">
+                      <i class="bi bi-box-arrow-up-right fs-6"></i>
+                    </button>
+                    <button type="button" class="btn btn-link btn-sm p-0 text-muted copy-btn" data-copy="{{ ic.commit_hash }}" title="Copiar hash completo">
+                      <i class="bi bi-clipboard" style="font-size: 0.75rem;"></i>
+                    </button>
                   </div>
-                  <div class="text-muted small">
-                    até {{ ex.end_date.strftime("%d/%m/%Y %H:%M") }}
-                  </div>
-                </td>
-                <td>
-                  <span class="font-monospace small text-info text-truncate d-inline-block" style="max-width: 250px;" title="{{ ex.repo_path }}">
-                    {{ ex.repo_path or 'Geral' }}
-                  </span>
-                </td>
-                <td class="text-center">
-                  <a href="/commits?start_date={{ ex.start_date.strftime('%Y-%m-%d') }}&end_date={{ ex.end_date.strftime('%Y-%m-%d') }}" class="badge bg-primary text-decoration-none">
-                    {{ ex.total_commits }}
-                  </a>
-                </td>
-                <td class="text-center">
-                  <span class="badge bg-dark border border-secondary text-light">{{ ex.total_meetings }}</span>
-                </td>
-                <td class="text-center">
-                  <span class="badge bg-dark border border-secondary text-light">{{ ex.total_catalog_items }}</span>
-                </td>
-                <td class="text-center">
-                  {% if ex.status == 'concluido' %}
-                  <span class="badge bg-success-subtle text-success border border-success-subtle">Concluído</span>
-                  {% elif ex.status == 'erro' %}
-                  <span class="badge bg-danger-subtle text-danger border border-danger-subtle" title="{{ ex.notes }}">Erro</span>
                   {% else %}
-                  <span class="badge bg-warning-subtle text-warning border border-warning-subtle">{{ ex.status }}</span>
+                  <span class="text-muted small">-</span>
+                  {% endif %}
+                </td>
+                <td>
+                  <div class="fw-semibold text-light text-break">{{ ic.title }}</div>
+                </td>
+                <td id="redmine-col-{{ ic.id }}">
+                  <div class="d-flex align-items-center gap-1" id="redmine-container-{{ ic.id }}">
+                    {% if ic.redmine_id %}
+                    <a href="https://redmine.tjce.jus.br/issues/{{ ic.redmine_id }}" target="_blank" class="badge bg-info-subtle text-info border border-info-subtle text-decoration-none d-inline-flex align-items-center gap-1" title="Abrir tarefa no Redmine">
+                      <i class="bi bi-box-arrow-up-right" style="font-size: 0.65rem;"></i> #{{ ic.redmine_id }}
+                    </a>
+                    {% else %}
+                    <span class="badge bg-secondary-subtle text-muted border border-secondary-subtle font-monospace" style="font-size: 0.75rem;">
+                      Pendente
+                    </span>
+                    {% endif %}
+                  </div>
+                </td>
+                <td>
+                  <div class="text-light small text-break p-2 rounded bg-dark bg-opacity-50 border border-secondary border-opacity-25" style="white-space: pre-line; max-height: 110px; overflow-y: auto; font-size: 0.8rem; line-height: 1.4;">
+                    {{ ic.description }}
+                  </div>
+                </td>
+                <td class="text-center" id="status-cell-ic-{{ ic.id }}">
+                  {% if ic.status == 'salvo' %}
+                  <span class="badge bg-success-subtle text-success border border-success-subtle py-1 px-2" title="Item de Catálogo salvo no PostgreSQL">
+                    <i class="bi bi-check-circle-fill me-1"></i>Salvo
+                  </span>
+                  {% elif ic.status == 'criado' %}
+                  <span class="badge bg-info-subtle text-info border border-info-subtle py-1 px-2" title="Criado no Redmine">
+                    <i class="bi bi-cloud-check-fill me-1"></i>Criado no Redmine
+                  </span>
+                  {% elif ic.status == 'aprovado' %}
+                  <span class="badge bg-primary-subtle text-primary border border-primary-subtle py-1 px-2">
+                    <i class="bi bi-check2-all me-1"></i>Aprovado
+                  </span>
+                  {% else %}
+                  <span class="badge bg-secondary-subtle text-muted border border-secondary-subtle py-1 px-2">
+                    {{ ic.status|capitalize }}
+                  </span>
                   {% endif %}
                 </td>
                 <td class="text-end">
                   <div class="btn-group btn-group-sm">
-                    <a href="/export/excel?execution_id={{ ex.id }}" class="btn btn-outline-success" title="Baixar Excel">
-                      <i class="bi bi-file-earmark-excel"></i>
-                    </a>
-                    <a href="/export/pdf?execution_id={{ ex.id }}" class="btn btn-outline-danger" title="Baixar PDF">
-                      <i class="bi bi-file-earmark-pdf"></i>
-                    </a>
+                    <button type="button" class="btn btn-outline-info copy-btn py-1 px-2" data-copy="TÍTULO:&#10;{{ ic.title }}&#10;&#10;DESCRIÇÃO:&#10;{{ ic.description }}" title="Copiar Título e Descrição para Redmine">
+                      <i class="bi bi-clipboard"></i> Copiar
+                    </button>
+                    {% if ic.commit_hash %}
+                    <button type="button" class="btn btn-outline-primary py-1 px-2" onclick="openCreateICByHash('{{ ic.commit_hash }}')" title="Ver no Modal / Criar no Redmine">
+                      <i class="bi bi-pencil-square"></i>
+                    </button>
+                    {% endif %}
+                    <form method="POST" action="/catalog-items/{{ ic.id }}/delete" class="d-inline" onsubmit="return confirm('Deseja realmente excluir este Item de Catálogo #{{ ic.id }}?');">
+                      <button type="submit" class="btn btn-outline-danger py-1 px-2" title="Excluir IC do Banco">
+                        <i class="bi bi-trash"></i>
+                      </button>
+                    </form>
                   </div>
                 </td>
               </tr>
               {% endfor %}
             {% else %}
               <tr>
-                <td colspan="9" class="text-center py-5 text-muted">
+                <td colspan="8" class="text-center py-5 text-muted">
                   <i class="bi bi-inbox fs-2 d-block mb-2 text-dim"></i>
-                  Nenhuma execução registrada no histórico ainda.<br/>
-                  Execute sua primeira busca na página inicial.
+                  Nenhum Item de Catálogo (IC) encontrado no histórico.<br/>
+                  <a href="/commits" class="btn btn-sm btn-primary-custom mt-3">
+                    <i class="bi bi-git me-1"></i> Ir para Consulta de Commits
+                  </a>
                 </td>
               </tr>
             {% endif %}
@@ -110,4 +229,8 @@
     </div>
   </div>
 </div>
+{% endblock %}
+
+{% block extra_scripts %}
+<!-- History view specific scripts -->
 {% endblock %}
