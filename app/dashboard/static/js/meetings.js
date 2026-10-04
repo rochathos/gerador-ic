@@ -215,7 +215,7 @@ async function executeMeetingICCreation(btn, isDryRun = false) {
       if (data.dry_run) {
         if (logsStatus) {
           logsStatus.className = "badge bg-info text-dark";
-          logsStatus.textContent = "Simulação Aprovada";
+          logsStatus.textContent = "Simulação Aprovada & Salva";
         }
         if (btn) {
           btn.disabled = false;
@@ -225,9 +225,21 @@ async function executeMeetingICCreation(btn, isDryRun = false) {
           feedbackAlert.classList.remove("d-none", "alert-danger");
           feedbackAlert.classList.add("alert-success");
           feedbackText.innerHTML = `
-            <span><i class="bi bi-check-circle-fill text-success me-1"></i><b>Simulação Concluída com 100% de Sucesso!</b> Projeto PJe, Atividade (#455), Complexidade (#456) e Quantidade (#457) foram validados com êxito. <u>Nenhuma tarefa criada no Redmine</u>.</span>
+            <span><i class="bi bi-check-circle-fill text-success me-1"></i><b>Simulação Concluída e Salva no Banco!</b> Tarefa simulada <b>#${data.issue_id}</b> registrada no banco de dados com status <i>salvo</i>.</span>
           `;
         }
+
+        // Update rows in table
+        activeMeetingIds.forEach((id) => {
+          const statusCell = document.getElementById(`meeting-status-${id}`);
+          if (statusCell) {
+            statusCell.innerHTML = `
+              <span class="badge bg-success-subtle text-success border border-success-subtle" title="Item de Catálogo já salvo no PostgreSQL (#${data.issue_id})">
+                <i class="bi bi-check-circle-fill me-1"></i>Salvo
+              </span>
+            `;
+          }
+        });
       } else {
         if (logsStatus) {
           logsStatus.className = "badge bg-success";
@@ -237,14 +249,14 @@ async function executeMeetingICCreation(btn, isDryRun = false) {
           btn.disabled = false;
           btn.className = "btn btn-success d-flex align-items-center gap-1";
           btn.innerHTML = `<i class="bi bi-box-arrow-up-right"></i> Redmine #${data.issue_id}`;
-          btn.onclick = () => window.open(data.issue_url, "_blank");
+          btn.onclick = () => window.open(data.issue_url || `https://redmine.tjce.jus.br/issues/${data.issue_id}`, "_blank");
         }
         if (feedbackAlert && feedbackText) {
           feedbackAlert.classList.remove("d-none", "alert-danger");
           feedbackAlert.classList.add("alert-success");
           feedbackText.innerHTML = `
-            <span><b>Sucesso!</b> Tarefa <b>#${data.issue_id}</b> criada no Redmine!</span>
-            <a href="${data.issue_url}" target="_blank" class="btn btn-sm btn-outline-success ms-2 py-0 px-2 text-decoration-none">
+            <span><b>Sucesso!</b> Tarefa <b>#${data.issue_id}</b> criada no Redmine e salva no banco de dados!</span>
+            <a href="${data.issue_url || `https://redmine.tjce.jus.br/issues/${data.issue_id}`}" target="_blank" class="btn btn-sm btn-outline-success ms-2 py-0 px-2 text-decoration-none">
               Abrir Tarefa <i class="bi bi-box-arrow-up-right ms-1"></i>
             </a>
           `;
@@ -255,7 +267,7 @@ async function executeMeetingICCreation(btn, isDryRun = false) {
           const statusCell = document.getElementById(`meeting-status-${id}`);
           if (statusCell) {
             statusCell.innerHTML = `
-              <a href="${data.issue_url}" target="_blank" class="badge bg-success text-decoration-none d-inline-flex align-items-center gap-1" title="Abrir tarefa no Redmine">
+              <a href="${data.issue_url || `https://redmine.tjce.jus.br/issues/${data.issue_id}`}" target="_blank" class="badge bg-success text-decoration-none d-inline-flex align-items-center gap-1" title="Abrir tarefa no Redmine">
                 <i class="bi bi-check-circle-fill"></i> #${data.issue_id}
               </a>
             `;
@@ -463,6 +475,39 @@ async function submitPastedJson() {
     }
   } catch (err) {
     alert("Falha de conexão: " + err.message);
+  }
+}
+
+/**
+ * Copy full IC format (Title + Description) directly for Redmine
+ */
+async function copyFullMeetingICToRedmine(btn) {
+  const titleEl = document.getElementById("meetingInputTitle");
+  const descEl = document.getElementById("meetingInputDesc");
+  const alertEl = document.getElementById("meetingFeedbackAlert");
+  const alertText = document.getElementById("meetingFeedbackText");
+
+  const title = titleEl ? titleEl.value.trim() : "";
+  const desc = descEl ? descEl.value.trim() : "";
+
+  const fullText = `TÍTULO:\n${title}\n\nDESCRIÇÃO:\n${desc}`;
+
+  try {
+    await navigator.clipboard.writeText(fullText);
+    if (btn) {
+      const origHtml = btn.innerHTML;
+      btn.innerHTML = '<i class="bi bi-check2 text-white"></i> Copiado!';
+      setTimeout(() => {
+        btn.innerHTML = origHtml;
+      }, 1800);
+    }
+    if (alertEl && alertText) {
+      alertEl.classList.remove("d-none", "alert-danger");
+      alertEl.classList.add("alert-success");
+      alertText.textContent = "Título e descrição copiados com sucesso! Cole diretamente no Redmine.";
+    }
+  } catch (err) {
+    console.error("Erro ao copiar IC de reunião:", err);
   }
 }
 

@@ -6,6 +6,7 @@ from sqlalchemy import select, and_, or_, desc
 
 from app.core.logger import logger
 from app.models.meeting import Meeting
+from app.models.catalog_item import CatalogItem
 from app.services.redmine_service import RedmineService
 
 
@@ -228,7 +229,7 @@ class MeetingService:
         search: Optional[str] = None,
         status: Optional[str] = None,
     ) -> List[Meeting]:
-        """Fetch stored meetings with optional filtering."""
+        """Fetch stored meetings with optional filtering and saved IC detection."""
         stmt = select(Meeting)
 
         conditions = []
@@ -240,13 +241,56 @@ class MeetingService:
             q = f"%{search.strip()}%"
             conditions.append(or_(Meeting.title.ilike(q), Meeting.contact_name.ilike(q)))
         if status:
-            conditions.append(Meeting.status == status)
+            if status in ("salvo", "criado"):
+                conditions.append(or_(Meeting.status.in_(["salvo", "criado"]), Meeting.redmine_id.is_not(None)))
+            elif status in ("pendente", "nao_salvo"):
+                conditions.append(and_(Meeting.status == "pendente", Meeting.redmine_id.is_(None)))
+            else:
+                conditions.append(Meeting.status == status)
 
         if conditions:
             stmt = stmt.where(and_(*conditions))
 
         stmt = stmt.order_by(desc(Meeting.start_time))
-        return list(db.execute(stmt).scalars().all())
+        meetings = list(db.execute(stmt).scalars().all())
+
+        # Determine is_saved for each meeting:
+        # Check against any saved meetings in DB with matching person, date/time, and duration
+        saved_stmt = select(Meeting).where(
+            or_(
+                Meeting.status.in_(["criado", "salvo"]),
+                Meeting.redmine_id.is_not(None),
+            )
+        )
+        saved_list = list(db.execute(saved_stmt).scalars().all())
+
+        for m in meetings:
+            if m.status in ("criado", "salvo") or m.redmine_id:
+                m.is_saved = True
+            else:
+                m_contact = (m.contact_name or "").strip().lower()
+                m_time = m.start_time
+                m_dur = (m.duration or "").strip().lower()
+
+                matched = False
+                for sm in saved_list:
+                    if sm.id == m.id:
+                        continue
+                    sm_contact = (sm.contact_name or "").strip().lower()
+                    sm_dur = (sm.duration or "").strip().lower()
+                    if m_contact and sm_contact == m_contact and sm_dur == m_dur:
+                        if sm.start_time and m_time and abs((sm.start_time - m_time).total_seconds()) <= 900:  # within 15 min
+                            m.is_saved = True
+                            if not m.redmine_id and sm.redmine_id:
+                                m.redmine_id = sm.redmine_id
+                            if m.status == "pendente":
+                                m.status = sm.status
+                            matched = True
+                            break
+                if not matched:
+                    m.is_saved = False
+
+        return meetings
 
     @classmethod
     def build_ic_description_for_meetings(cls, meetings: List[Meeting], title: str) -> str:
@@ -308,13 +352,34 @@ class MeetingService:
             dry_run=dry_run,
         )
 
-        # If official creation succeeded, update meetings status
-        if success and not dry_run and issue_id:
+        # If creation or simulation succeeded, update meetings and save CatalogItem
+        if success:
+            if not dry_run and issue_id:
+                final_status = "criado"
+                final_id = str(issue_id)
+            else:
+                final_status = "salvo"
+                final_id = str(issue_id or 99999)
+                if not issue_id:
+                    issue_id = 99999
+                    issue_url = "https://redmine.tjce.jus.br/issues/99999"
+
             for m in meetings:
-                m.status = "criado"
-                m.redmine_id = str(issue_id)
+                m.status = final_status
+                m.redmine_id = final_id
+                m.is_saved = True
+
+            # Save in CatalogItem for PostgreSQL history & dashboard KPIs
+            cat_item = CatalogItem(
+                title=title,
+                description=desc,
+                status=final_status,
+                redmine_id=final_id,
+            )
+            db.add(cat_item)
+
             db.commit()
-            logger.info(f"[MEETING IC] {len(meetings)} reuniões vinculadas à tarefa Redmine #{issue_id}.")
+            logger.info(f"[MEETING IC] {len(meetings)} reuniões vinculadas à tarefa #{final_id} (status={final_status}).")
 
         return success, issue_url, issue_id, logs
 

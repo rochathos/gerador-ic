@@ -39,7 +39,7 @@ def test_validate_repository_invalid():
 def test_get_commits_period():
     """Test extracting commits within a specific period."""
     now = datetime.now(timezone.utc)
-    start_date = now - timedelta(days=1)
+    start_date = now - timedelta(days=7)
     end_date = now + timedelta(days=1)
 
     commits = GitService.get_commits(

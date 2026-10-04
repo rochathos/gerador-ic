@@ -140,11 +140,11 @@
           <input type="date" name="end_date" class="form-control form-control-custom" value="{{ filter_end_date }}">
         </div>
         <div class="col-12 col-sm-6 col-md-2">
-          <label class="form-label text-muted small fw-semibold">Status Redmine</label>
+          <label class="form-label text-muted small fw-semibold">Status IC</label>
           <select name="status" class="form-select form-control-custom">
             <option value="" {% if not filter_status %}selected{% endif %}>Todos os Status</option>
-            <option value="pendente" {% if filter_status == 'pendente' %}selected{% endif %}>Pendente</option>
-            <option value="criado" {% if filter_status == 'criado' %}selected{% endif %}>Criado no Redmine</option>
+            <option value="salvo" {% if filter_status == 'salvo' or filter_status == 'criado' %}selected{% endif %}>Salvo no Banco / Redmine</option>
+            <option value="pendente" {% if filter_status == 'pendente' or filter_status == 'nao_salvo' %}selected{% endif %}>Não Salvo</option>
           </select>
         </div>
         <div class="col-12 col-md-3 d-flex gap-2">
@@ -170,7 +170,7 @@
               Selecionar Todas
             </label>
           </div>
-          <span class="text-muted small">&bull; Total: <b class="text-light">{{ meetings|length }}</b> chamadas</span>
+          <span class="text-muted small">&bull; Exibindo <b class="text-light">{{ meetings|length }}</b> chamadas registradas</span>
         </div>
         <div class="d-flex gap-2">
           <button type="button" class="btn btn-sm btn-outline-danger" onclick="deleteSelectedMeetings()" title="Excluir chamadas selecionadas">
@@ -188,8 +188,8 @@
               <th style="width: 130px;">Tipo</th>
               <th style="width: 170px;">Data & Horário</th>
               <th style="width: 120px;" class="text-center">Duração</th>
-              <th style="width: 150px;" class="text-center">Status Redmine</th>
-              <th style="width: 120px;" class="text-end">Ações</th>
+              <th style="width: 110px;" class="text-center">Status IC</th>
+              <th style="width: 120px;" class="text-center">Criar IC</th>
             </tr>
           </thead>
           <tbody>
@@ -236,19 +236,30 @@
                   <span class="badge bg-dark border border-secondary text-info font-monospace">{{ m.duration }}</span>
                 </td>
                 <td class="text-center" id="meeting-status-{{ m.id }}">
-                  {% if m.status == 'criado' and m.redmine_id %}
+                  {% if m.redmine_id and m.status == 'criado' %}
                     <a href="https://redmine.tjce.jus.br/issues/{{ m.redmine_id }}" target="_blank" class="badge bg-success text-decoration-none d-inline-flex align-items-center gap-1" title="Abrir tarefa no Redmine">
                       <i class="bi bi-check-circle-fill"></i> #{{ m.redmine_id }}
                     </a>
+                  {% elif m.redmine_id and m.status == 'salvo' %}
+                    <span class="badge bg-info-subtle text-info border border-info-subtle font-monospace d-inline-flex align-items-center gap-1" title="IC Simulado salvo no banco (#{{ m.redmine_id }})">
+                      <i class="bi bi-check-circle-fill"></i> #{{ m.redmine_id }} (Simulado)
+                    </span>
+                  {% elif m.is_saved %}
+                    <span class="badge bg-success-subtle text-success border border-success-subtle" title="Item de Catálogo já salvo no PostgreSQL">
+                      <i class="bi bi-check-circle-fill me-1"></i>Salvo
+                    </span>
                   {% else %}
-                    <span class="badge bg-warning bg-opacity-25 text-warning border border-warning border-opacity-25">
-                      Pendente
+                    <span class="badge bg-secondary-subtle text-muted border border-secondary-subtle" title="Não salvo no banco de dados">
+                      Não Salvo
                     </span>
                   {% endif %}
                 </td>
-                <td class="text-end">
-                  <button type="button" class="btn btn-sm btn-outline-warning d-inline-flex align-items-center gap-1" onclick="openMeetingICModal({{ m.id }}, '{{ m.title|replace('\'', '\\\'') }}', '{{ m.contact_name or '' }}', '{{ m.duration }}', '{{ m.start_time.strftime('%d/%m/%Y %H:%M') }}')">
-                    <i class="bi bi-plus-circle"></i> Criar IC
+                <td class="text-center">
+                  <button type="button" class="btn btn-sm btn-primary-custom py-1 px-2 small d-inline-flex align-items-center gap-1"
+                          onclick="openMeetingICModal({{ m.id }}, '{{ m.title|replace('\'', '\\\'') }}', '{{ m.contact_name or '' }}', '{{ m.duration }}', '{{ m.start_time.strftime('%d/%m/%Y %H:%M') }}')"
+                          title="Gerar Item de Catálogo (IC) para esta reunião">
+                    <i class="bi bi-card-checklist"></i>
+                    <span>Criar IC</span>
                   </button>
                 </td>
               </tr>
@@ -293,7 +304,7 @@
     <div class="modal-content modal-content-custom">
       <div class="modal-header modal-header-custom">
         <h5 class="modal-title d-flex align-items-center gap-2" id="meetingICModalTitle">
-          <i class="bi bi-telephone-plus text-info"></i> Item de Catálogo (IC) de Reunião
+          <i class="bi bi-card-checklist text-primary"></i> Item de Catálogo (IC) Gerado
         </h5>
         <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
       </div>
@@ -304,14 +315,20 @@
         </div>
 
         <div class="mb-3">
-          <label for="meetingInputTitle" class="form-label text-muted small fw-bold mb-1">TÍTULO DO IC (REDMINE):</label>
+          <div class="d-flex justify-content-between align-items-center mb-1">
+            <label for="meetingInputTitle" class="form-label text-muted small fw-bold mb-0">TÍTULO DO IC (REDMINE):</label>
+            <button type="button" class="btn btn-sm btn-link p-0 text-info text-decoration-none small" onclick="copyModalField('meetingInputTitle', this)">
+              <i class="bi bi-clipboard"></i> Copiar Título
+            </button>
+          </div>
           <input type="text" class="form-control form-control-custom fw-semibold" id="meetingInputTitle">
         </div>
 
         <div class="row g-3 mb-3">
           <div class="col-12 col-md-6">
-            <label for="meetingInputActivity" class="form-label text-muted small fw-bold mb-1">
-              <i class="bi bi-tag text-info me-1"></i> [DEVPJE] - ATIVIDADE CATÁLOGO (#455):
+            <label for="meetingInputActivity" class="form-label text-muted small fw-bold mb-1 d-flex align-items-center justify-content-between">
+              <span><i class="bi bi-tag text-info me-1"></i> [DEVPJE] - ATIVIDADE CATÁLOGO:</span>
+              <span class="badge bg-secondary-subtle text-muted fw-normal" style="font-size:0.7rem;">#455</span>
             </label>
             <select class="form-select form-control-custom fw-semibold" id="meetingInputActivity">
               <option value="Gestão - Participação em reunião, exceto reunião de levantamento de requisitos" selected>
@@ -326,8 +343,9 @@
             </select>
           </div>
           <div class="col-12 col-md-3">
-            <label for="meetingInputComplexity" class="form-label text-muted small fw-bold mb-1">
-              <i class="bi bi-speedometer2 text-warning me-1"></i> COMPLEXIDADE (#456):
+            <label for="meetingInputComplexity" class="form-label text-muted small fw-bold mb-1 d-flex align-items-center justify-content-between">
+              <span><i class="bi bi-speedometer2 text-warning me-1"></i> COMPLEXIDADE:</span>
+              <span class="badge bg-secondary-subtle text-muted fw-normal" style="font-size:0.7rem;">#456</span>
             </label>
             <select class="form-select form-control-custom fw-semibold" id="meetingInputComplexity">
               <option value="Baixa" selected>Baixa</option>
@@ -337,15 +355,21 @@
             </select>
           </div>
           <div class="col-12 col-md-3">
-            <label for="meetingInputQuantity" class="form-label text-muted small fw-bold mb-1">
-              <i class="bi bi-123 text-success me-1"></i> QUANTIDADE (#457):
+            <label for="meetingInputQuantity" class="form-label text-muted small fw-bold mb-1 d-flex align-items-center justify-content-between">
+              <span><i class="bi bi-123 text-info me-1"></i> QUANTIDADE:</span>
+              <span class="badge bg-secondary-subtle text-muted fw-normal" style="font-size:0.7rem;">#457</span>
             </label>
             <input type="number" min="1" class="form-control form-control-custom fw-semibold font-monospace" id="meetingInputQuantity" value="1">
           </div>
         </div>
 
         <div class="mb-3">
-          <label for="meetingInputDesc" class="form-label text-muted small fw-bold mb-1">DESCRIÇÃO & NOTA DE EVIDÊNCIA (REDMINE):</label>
+          <div class="d-flex justify-content-between align-items-center mb-1">
+            <label for="meetingInputDesc" class="form-label text-muted small fw-bold mb-0">DESCRIÇÃO DO IC (REDMINE):</label>
+            <button type="button" class="btn btn-sm btn-link p-0 text-info text-decoration-none small" onclick="copyModalField('meetingInputDesc', this)">
+              <i class="bi bi-clipboard"></i> Copiar Descrição
+            </button>
+          </div>
           <textarea class="form-control form-control-custom font-monospace small" id="meetingInputDesc" rows="8" style="resize: vertical;"></textarea>
         </div>
 
@@ -365,6 +389,9 @@
       <div class="modal-footer modal-footer-custom d-flex justify-content-between">
         <button type="button" class="btn btn-secondary-custom" data-bs-dismiss="modal">Fechar</button>
         <div class="d-flex flex-wrap gap-2">
+          <button type="button" class="btn btn-primary-custom d-flex align-items-center gap-1" onclick="copyFullMeetingICToRedmine(this)">
+            <i class="bi bi-clipboard-check"></i> Copiar Tudo
+          </button>
           <button type="button" class="btn btn-outline-warning d-flex align-items-center gap-1" id="btnSimulateMeetingIC" onclick="executeMeetingICCreation(this, true)" title="Valida a criação sem enviar ao Redmine">
             <i class="bi bi-shield-check"></i> Testar no Redmine (Simulação)
           </button>

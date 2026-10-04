@@ -28,5 +28,16 @@ class Meeting(Base):
 
     execution: Mapped[Optional["ExecutionHistory"]] = relationship("ExecutionHistory", back_populates="meetings")
 
+    @property
+    def is_saved(self) -> bool:
+        override = getattr(self, "_is_saved_override", None)
+        if override is not None:
+            return override
+        return (self.status in ("criado", "salvo")) or bool(self.redmine_id)
+
+    @is_saved.setter
+    def is_saved(self, val: bool) -> None:
+        self._is_saved_override = val
+
     def __repr__(self) -> str:
         return f"<Meeting {self.title} ({self.duration})>"

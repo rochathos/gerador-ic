@@ -912,7 +912,7 @@ def meetings_view(
     total_duration_str = MeetingService.format_seconds_to_duration(total_seconds)
 
     total_meetings = len(meetings)
-    total_created = sum(1 for m in meetings if m.status == "criado")
+    total_created = sum(1 for m in meetings if m.is_saved)
     total_pending = total_meetings - total_created
 
     return templates.TemplateResponse(

@@ -275,5 +275,84 @@ def test_import_teams_calls_17_minutes():
     assert "17m" in meetings_page.text
 
 
+def test_meeting_is_saved_status_and_card_layout():
+    """Verify that a meeting saved in DB shows 'Salvo' status and matching meetings inherit saved status."""
+    from app.core.database import SessionLocal
+    from app.models.meeting import Meeting
+    from app.models.catalog_item import CatalogItem
+    from app.services.meeting_service import MeetingService
+    from datetime import datetime, timezone, timedelta
+
+    db = SessionLocal()
+    try:
+        now = datetime.now(timezone.utc).replace(microsecond=0)
+        # 1. Create a meeting
+        m1 = Meeting(
+            title="Alinhamento Arquitetura",
+            contact_name="Fulano de Tal",
+            call_type="efetuada",
+            start_time=now,
+            end_time=now + timedelta(minutes=30),
+            duration="30m",
+            status="pendente",
+        )
+        db.add(m1)
+        db.commit()
+        db.refresh(m1)
+
+        # 2. Before IC, should be is_saved False
+        assert m1.is_saved is False
+
+        # 3. Call create-ic with dry_run=True (simulation)
+        payload = {
+            "meeting_ids": [m1.id],
+            "title": "Alinhamento com Fulano de Tal",
+            "activity_type": "Gestão - Participação em reunião, exceto reunião de levantamento de requisitos",
+            "complexity": "Baixa",
+            "dry_run": True,
+        }
+        res = client.post("/api/meetings/create-ic", json=payload)
+        assert res.status_code == 200
+        data = res.json()
+        assert data["success"] is True
+
+        db.refresh(m1)
+        assert m1.is_saved is True
+        assert m1.status == "salvo"
+
+        # 4. Check meetings page shows "Salvo"
+        page = client.get("/meetings")
+        assert page.status_code == 200
+        assert "Status IC" in page.text
+        assert "Salvo" in page.text
+
+        # 5. Create another meeting with same person, date/time and duration
+        m2 = Meeting(
+            title="Alinhamento Arquitetura Duplicado",
+            contact_name="Fulano de Tal",
+            call_type="efetuada",
+            start_time=now,
+            end_time=now + timedelta(minutes=30),
+            duration="30m",
+            status="pendente",
+        )
+        db.add(m2)
+        db.commit()
+        db.refresh(m2)
+
+        # get_meetings should identify m2 as is_saved because an identical saved meeting exists
+        meetings = MeetingService.get_meetings(db)
+        m2_found = next((m for m in meetings if m.id == m2.id), None)
+        assert m2_found is not None
+        assert m2_found.is_saved is True
+
+        # Clean up
+        db.delete(m1)
+        db.delete(m2)
+        db.commit()
+    finally:
+        db.close()
+
+
 
 
