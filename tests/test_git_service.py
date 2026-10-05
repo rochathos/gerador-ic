@@ -304,15 +304,15 @@ def test_build_ic_description_compact_format():
     assert "Itens de Catálogo (IC) calculados: 6 IC(s) (+5 adições, -1 remoções)" in desc
     assert "Arquivos Alterados:" in desc
     # Checks that tags are placed under the XML file with a line break per tag
-    assert "- [XML] Fluxos/1o Grau/Criminal/Análise de Secretaria - Crimes Tráfico de Drogas.xml (+15 / -2)" in desc
-    assert "  * Tags Adicionadas (+4):" in desc
-    assert "    * <transition>: 4" in desc
-    assert "- [XML] Fluxos/1o Grau/Criminal/Análise de Secretaria - VDOC.xml (+1 / -1)" in desc
-    assert "  * Tags Adicionadas (+1):" in desc
-    assert "    * <condition>: 1" in desc
-    assert "  * Tags Removidas (-1):" in desc
-    assert "    * <condition>: 1" in desc
-    assert "- src/main/resources/application.properties (+2 / -0)" in desc
+    assert "* [XML] Fluxos/1o Grau/Criminal/Análise de Secretaria - Crimes Tráfico de Drogas.xml (+15 / -2)" in desc
+    assert "** Tags Adicionadas (+4):" in desc
+    assert "*** <transition>: 4" in desc
+    assert "* [XML] Fluxos/1o Grau/Criminal/Análise de Secretaria - VDOC.xml (+1 / -1)" in desc
+    assert "** Tags Adicionadas (+1):" in desc
+    assert "*** <condition>: 1" in desc
+    assert "** Tags Removidas (-1):" in desc
+    assert "*** <condition>: 1" in desc
+    assert "* src/main/resources/application.properties (+2 / -0)" in desc
     assert "(Total de arquivos XML alterados: 2)" in desc
     # Ensure redundant section was removed
     assert "Detalhamento por Fluxo" not in desc
@@ -367,13 +367,13 @@ def test_build_ic_description_with_modified_tags():
 
     assert "Commit: a716bd9" in desc
     assert "Itens de Catálogo (IC) calculados: 5 IC(s) (-2 remoções, ~3 ajustes)" in desc
-    assert "  * Tags Removidas (-2):" in desc
-    assert "    * <node>: 1" in desc
-    assert "    * <transition>: 1" in desc
-    assert "  * Tags Modificadas / Ajustadas (~3):" in desc
-    assert "    * <decision>: 1" in desc
-    assert "    * <task-node>: 1" in desc
-    assert "    * <transition>: 1" in desc
+    assert "** Tags Removidas (-2):" in desc
+    assert "*** <node>: 1" in desc
+    assert "*** <transition>: 1" in desc
+    assert "** Tags Modificadas / Ajustadas (~3):" in desc
+    assert "*** <decision>: 1" in desc
+    assert "*** <task-node>: 1" in desc
+    assert "*** <transition>: 1" in desc
 
 
 def test_build_ic_description_multi_flow_with_condition():
@@ -444,9 +444,9 @@ def test_build_ic_description_multi_flow_with_condition():
 
     assert "Commit: 5de7896" in desc
     assert "Itens de Catálogo (IC) calculados: 14 IC(s) (+4 adições, ~10 ajustes)" in desc
-    assert "- [XML] Fluxos/1o Grau/Criminal/Análise de Secretaria - Crimes Tráfico de Drogas.xml (+15 / -2)" in desc
-    assert "- [XML] Fluxos/1o Grau/Criminal/Análise de Secretaria - Júri Organizações Criminosas.xml (+20 / -7)" in desc
-    assert "- [XML] Fluxos/1o Grau/Criminal/Análise de Secretaria - VDOC.xml (+1 / -1)" in desc
+    assert "* [XML] Fluxos/1o Grau/Criminal/Análise de Secretaria - Crimes Tráfico de Drogas.xml (+15 / -2)" in desc
+    assert "* [XML] Fluxos/1o Grau/Criminal/Análise de Secretaria - Júri Organizações Criminosas.xml (+20 / -7)" in desc
+    assert "* [XML] Fluxos/1o Grau/Criminal/Análise de Secretaria - VDOC.xml (+1 / -1)" in desc
     assert "<condition>: 1" in desc
     assert "(Total de arquivos XML alterados: 3)" in desc
 

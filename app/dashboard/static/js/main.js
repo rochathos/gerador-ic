@@ -776,7 +776,7 @@ function openCreateICModal(commitData) {
 
         if (isXml) {
           xmlCount++;
-          lines.push(`- [XML] ${path}${diff}`);
+          lines.push(`* [XML] ${path}${diff}`);
 
           const flowData = findFlowMetricsForFile(path, flows);
           if (flowData) {
@@ -789,26 +789,26 @@ function openCreateICModal(commitData) {
             const fTotalModified = flowData.total_modified || Object.values(fModified).reduce((a, b) => a + b, 0);
 
             if (Object.keys(fAdded).length > 0) {
-              lines.push(`  * Tags Adicionadas (+${fTotalAdded}):`);
+              lines.push(`** Tags Adicionadas (+${fTotalAdded}):`);
               Object.entries(fAdded).sort((a, b) => b[1] - a[1]).forEach(([t, c]) => {
-                lines.push(`    * <${t}>: ${c}`);
+                lines.push(`*** <${t}>: ${c}`);
               });
             }
             if (Object.keys(fRemoved).length > 0) {
-              lines.push(`  * Tags Removidas (-${fTotalRemoved}):`);
+              lines.push(`** Tags Removidas (-${fTotalRemoved}):`);
               Object.entries(fRemoved).sort((a, b) => b[1] - a[1]).forEach(([t, c]) => {
-                lines.push(`    * <${t}>: ${c}`);
+                lines.push(`*** <${t}>: ${c}`);
               });
             }
             if (Object.keys(fModified).length > 0) {
-              lines.push(`  * Tags Modificadas / Ajustadas (~${fTotalModified}):`);
+              lines.push(`** Tags Modificadas / Ajustadas (~${fTotalModified}):`);
               Object.entries(fModified).sort((a, b) => b[1] - a[1]).forEach(([t, c]) => {
-                lines.push(`    * <${t}>: ${c}`);
+                lines.push(`*** <${t}>: ${c}`);
               });
             }
           }
         } else {
-          lines.push(`- ${path}${diff}`);
+          lines.push(`* ${path}${diff}`);
         }
       });
 
@@ -819,7 +819,7 @@ function openCreateICModal(commitData) {
             const flowCheck = findFlowMetricsForFile(fPath, Object.fromEntries([...matchedFlows].map(p => [p, {}])));
             if (!flowCheck) {
               xmlCount++;
-              lines.push(`- [XML] ${fPath}`);
+              lines.push(`* [XML] ${fPath}`);
               const fAdded = fData.added || {};
               const fRemoved = fData.removed || {};
               const fModified = fData.modified || {};
@@ -827,21 +827,21 @@ function openCreateICModal(commitData) {
               const fTotalRemoved = fData.total_removed || Object.values(fRemoved).reduce((a, b) => a + b, 0);
               const fTotalModified = fData.total_modified || Object.values(fModified).reduce((a, b) => a + b, 0);
               if (Object.keys(fAdded).length > 0) {
-                lines.push(`  * Tags Adicionadas (+${fTotalAdded}):`);
+                lines.push(`** Tags Adicionadas (+${fTotalAdded}):`);
                 Object.entries(fAdded).sort((a, b) => b[1] - a[1]).forEach(([t, c]) => {
-                  lines.push(`    * <${t}>: ${c}`);
+                  lines.push(`*** <${t}>: ${c}`);
                 });
               }
               if (Object.keys(fRemoved).length > 0) {
-                lines.push(`  * Tags Removidas (-${fTotalRemoved}):`);
+                lines.push(`** Tags Removidas (-${fTotalRemoved}):`);
                 Object.entries(fRemoved).sort((a, b) => b[1] - a[1]).forEach(([t, c]) => {
-                  lines.push(`    * <${t}>: ${c}`);
+                  lines.push(`*** <${t}>: ${c}`);
                 });
               }
               if (Object.keys(fModified).length > 0) {
-                lines.push(`  * Tags Modificadas / Ajustadas (~${fTotalModified}):`);
+                lines.push(`** Tags Modificadas / Ajustadas (~${fTotalModified}):`);
                 Object.entries(fModified).sort((a, b) => b[1] - a[1]).forEach(([t, c]) => {
-                  lines.push(`    * <${t}>: ${c}`);
+                  lines.push(`*** <${t}>: ${c}`);
                 });
               }
             }
@@ -859,7 +859,7 @@ function openCreateICModal(commitData) {
       Object.entries(flows).forEach(([fPath, fData]) => {
         if ((fData.total_ics || 0) > 0) {
           xmlCount++;
-          lines.push(`- [XML] ${fPath}`);
+          lines.push(`* [XML] ${fPath}`);
           const fAdded = fData.added || {};
           const fRemoved = fData.removed || {};
           const fModified = fData.modified || {};
@@ -867,21 +867,21 @@ function openCreateICModal(commitData) {
           const fTotalRemoved = fData.total_removed || Object.values(fRemoved).reduce((a, b) => a + b, 0);
           const fTotalModified = fData.total_modified || Object.values(fModified).reduce((a, b) => a + b, 0);
           if (Object.keys(fAdded).length > 0) {
-            lines.push(`  * Tags Adicionadas (+${fTotalAdded}):`);
+            lines.push(`** Tags Adicionadas (+${fTotalAdded}):`);
             Object.entries(fAdded).sort((a, b) => b[1] - a[1]).forEach(([t, c]) => {
-              lines.push(`    * <${t}>: ${c}`);
+              lines.push(`*** <${t}>: ${c}`);
             });
           }
           if (Object.keys(fRemoved).length > 0) {
-            lines.push(`  * Tags Removidas (-${fTotalRemoved}):`);
+            lines.push(`** Tags Removidas (-${fTotalRemoved}):`);
             Object.entries(fRemoved).sort((a, b) => b[1] - a[1]).forEach(([t, c]) => {
-              lines.push(`    * <${t}>: ${c}`);
+              lines.push(`*** <${t}>: ${c}`);
             });
           }
           if (Object.keys(fModified).length > 0) {
-            lines.push(`  * Tags Modificadas / Ajustadas (~${fTotalModified}):`);
+            lines.push(`** Tags Modificadas / Ajustadas (~${fTotalModified}):`);
             Object.entries(fModified).sort((a, b) => b[1] - a[1]).forEach(([t, c]) => {
-              lines.push(`    * <${t}>: ${c}`);
+              lines.push(`*** <${t}>: ${c}`);
             });
           }
         }
@@ -893,21 +893,21 @@ function openCreateICModal(commitData) {
       lines.push("");
       lines.push("Tags XML Alteradas:");
       if (Object.keys(addedTags).length > 0) {
-        lines.push(`- Tags Adicionadas (+${totalAdded}):`);
+        lines.push(`* Tags Adicionadas (+${totalAdded}):`);
         Object.entries(addedTags).sort((a, b) => b[1] - a[1]).forEach(([t, c]) => {
-          lines.push(`  * <${t}>: ${c}`);
+          lines.push(`** <${t}>: ${c}`);
         });
       }
       if (Object.keys(removedTags).length > 0) {
-        lines.push(`- Tags Removidas (-${totalRemoved}):`);
+        lines.push(`* Tags Removidas (-${totalRemoved}):`);
         Object.entries(removedTags).sort((a, b) => b[1] - a[1]).forEach(([t, c]) => {
-          lines.push(`  * <${t}>: ${c}`);
+          lines.push(`** <${t}>: ${c}`);
         });
       }
       if (Object.keys(modifiedTags).length > 0) {
-        lines.push(`- Tags Modificadas / Ajustadas (~${totalModified}):`);
+        lines.push(`* Tags Modificadas / Ajustadas (~${totalModified}):`);
         Object.entries(modifiedTags).sort((a, b) => b[1] - a[1]).forEach(([t, c]) => {
-          lines.push(`  * <${t}>: ${c}`);
+          lines.push(`** <${t}>: ${c}`);
         });
       }
     }

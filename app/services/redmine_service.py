@@ -63,6 +63,28 @@ class RedmineService:
             return False, msg, None
 
     @classmethod
+    def format_description_for_redmine(cls, text: str) -> str:
+        """Format description to ensure line breaks and lists are rendered cleanly in Redmine Textile/Markdown."""
+        if not text:
+            return ""
+        raw_lines = text.replace("\r\n", "\n").split("\n")
+        processed_lines: List[str] = []
+        for line in raw_lines:
+            stripped_left = line.lstrip()
+            # Convert legacy indented tag bullets into Redmine Textile nested bullets
+            if stripped_left.startswith("* <") or stripped_left.startswith("* &lt;"):
+                processed_lines.append(f"*** {stripped_left[2:]}")
+            elif stripped_left.startswith("* Tags ") or stripped_left.startswith("* Tags:"):
+                processed_lines.append(f"** {stripped_left[2:]}")
+            elif line.startswith("- [XML]") or line.startswith("* [XML]"):
+                processed_lines.append(f"* [XML]{line[7:]}")
+            elif line.startswith("- ") and not line.startswith("- -"):
+                processed_lines.append(f"* {line[2:]}")
+            else:
+                processed_lines.append(line)
+        return "\n".join(processed_lines)
+
+    @classmethod
     def create_catalog_item_api(
         cls,
         title: str,
@@ -166,12 +188,13 @@ class RedmineService:
             custom_fields.append({"id": 479, "value": commit_url})
             log_step(f"[PASSO 4/6]   -> Link Nota Evidência (479): '{commit_url}'")
 
+        formatted_desc = cls.format_description_for_redmine(description)
         payload = {
             "issue": {
                 "project_id": proj_id,
                 "tracker_id": track_id,
                 "subject": title[:255] if title else "Item de Catálogo",
-                "description": description or "",
+                "description": formatted_desc,
                 "custom_fields": custom_fields,
             }
         }
