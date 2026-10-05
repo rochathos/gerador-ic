@@ -304,8 +304,7 @@ class MeetingService:
             f"Duração Total Acumulada: {total_dur_str}",
             "",
             "Detalhamento das Chamadas Realizadas (Evidência Microsoft Teams):",
-            "| Data e Horário | Contato / Participante | Tipo | Duração |",
-            "|---|---|---|---|",
+            "|_. Data e Horário |_. Contato / Participante |_. Tipo |_. Duração |",
         ]
 
         for m in sorted(meetings, key=lambda x: x.start_time):

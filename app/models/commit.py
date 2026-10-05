@@ -105,17 +105,17 @@ def format_ic_details(parsed_metrics: Dict[str, Any], ic_count: int = 0) -> List
             lines.append("")
             lines.append(f"Fluxo: {path}")
             if f_added:
-                lines.append(f"- Tags Adicionadas (+{f_total_added}):")
+                lines.append(f"* Tags Adicionadas (+{f_total_added}):")
                 for tag, count in sorted(f_added.items(), key=lambda x: x[1], reverse=True):
-                    lines.append(f"  * <{tag}>: {count}")
+                    lines.append(f"** <{tag}>: {count}")
             if f_removed:
-                lines.append(f"- Tags Removidas (-{f_total_removed}):")
+                lines.append(f"* Tags Removidas (-{f_total_removed}):")
                 for tag, count in sorted(f_removed.items(), key=lambda x: x[1], reverse=True):
-                    lines.append(f"  * <{tag}>: {count}")
+                    lines.append(f"** <{tag}>: {count}")
             if f_modified:
-                lines.append(f"- Tags Modificadas / Ajustadas (~{f_total_modified}):")
+                lines.append(f"* Tags Modificadas / Ajustadas (~{f_total_modified}):")
                 for tag, count in sorted(f_modified.items(), key=lambda x: x[1], reverse=True):
-                    lines.append(f"  * <{tag}>: {count}")
+                    lines.append(f"** <{tag}>: {count}")
     else:
         added_tags = parsed_metrics.get("added", {})
         removed_tags = parsed_metrics.get("removed", {})
@@ -123,17 +123,17 @@ def format_ic_details(parsed_metrics: Dict[str, Any], ic_count: int = 0) -> List
         if added_tags or removed_tags or modified_tags:
             lines.append("Detalhamento das tags XML (regras do PJE):")
             if added_tags:
-                lines.append(f"- Tags Adicionadas (+{added_cnt}):")
+                lines.append(f"* Tags Adicionadas (+{added_cnt}):")
                 for tag, count in sorted(added_tags.items(), key=lambda x: x[1], reverse=True):
-                    lines.append(f"  * <{tag}>: {count}")
+                    lines.append(f"** <{tag}>: {count}")
             if removed_tags:
-                lines.append(f"- Tags Removidas (-{removed_cnt}):")
+                lines.append(f"* Tags Removidas (-{removed_cnt}):")
                 for tag, count in sorted(removed_tags.items(), key=lambda x: x[1], reverse=True):
-                    lines.append(f"  * <{tag}>: {count}")
+                    lines.append(f"** <{tag}>: {count}")
             if modified_tags:
-                lines.append(f"- Tags Modificadas / Ajustadas (~{modified_cnt}):")
+                lines.append(f"* Tags Modificadas / Ajustadas (~{modified_cnt}):")
                 for tag, count in sorted(modified_tags.items(), key=lambda x: x[1], reverse=True):
-                    lines.append(f"  * <{tag}>: {count}")
+                    lines.append(f"** <{tag}>: {count}")
 
     return lines
 
@@ -156,7 +156,7 @@ def find_flow_metrics_for_file(path: str, flows: Dict[str, Any]) -> Optional[Dic
 
 
 def format_flow_tags_lines(flow_data: Dict[str, Any]) -> List[str]:
-    """Format tags touched for a specific flow with a line break for each adjusted tag."""
+    """Format tags touched for a specific flow with Redmine Textile nested list syntax."""
     lines: List[str] = []
     f_added = flow_data.get("added", {})
     f_removed = flow_data.get("removed", {})
@@ -166,17 +166,17 @@ def format_flow_tags_lines(flow_data: Dict[str, Any]) -> List[str]:
     f_total_modified = flow_data.get("total_modified", sum(f_modified.values()))
 
     if f_added:
-        lines.append(f"  * Tags Adicionadas (+{f_total_added}):")
+        lines.append(f"** Tags Adicionadas (+{f_total_added}):")
         for tag, count in sorted(f_added.items(), key=lambda x: x[1], reverse=True):
-            lines.append(f"    * <{tag}>: {count}")
+            lines.append(f"*** <{tag}>: {count}")
     if f_removed:
-        lines.append(f"  * Tags Removidas (-{f_total_removed}):")
+        lines.append(f"** Tags Removidas (-{f_total_removed}):")
         for tag, count in sorted(f_removed.items(), key=lambda x: x[1], reverse=True):
-            lines.append(f"    * <{tag}>: {count}")
+            lines.append(f"*** <{tag}>: {count}")
     if f_modified:
-        lines.append(f"  * Tags Modificadas / Ajustadas (~{f_total_modified}):")
+        lines.append(f"** Tags Modificadas / Ajustadas (~{f_total_modified}):")
         for tag, count in sorted(f_modified.items(), key=lambda x: x[1], reverse=True):
-            lines.append(f"    * <{tag}>: {count}")
+            lines.append(f"*** <{tag}>: {count}")
 
     return lines
 
@@ -256,13 +256,13 @@ def build_ic_description(
 
             if is_xml:
                 xml_count += 1
-                lines.append(f"- [XML] {path}{diff_info}")
+                lines.append(f"* [XML] {path}{diff_info}")
                 flow_data = find_flow_metrics_for_file(path, flows)
                 if flow_data:
                     matched_flow_paths.add(flow_data.get("path", path))
                     lines.extend(format_flow_tags_lines(flow_data))
             else:
-                lines.append(f"- {path}{diff_info}")
+                lines.append(f"* {path}{diff_info}")
 
         # In case some flows were not in files_changed (fallback)
         for f_path, f_data in flows.items():
@@ -270,7 +270,7 @@ def build_ic_description(
                 flow_check = find_flow_metrics_for_file(f_path, {p: {} for p in matched_flow_paths})
                 if not flow_check:
                     xml_count += 1
-                    lines.append(f"- [XML] {f_path}")
+                    lines.append(f"* [XML] {f_path}")
                     lines.extend(format_flow_tags_lines(f_data))
 
         if xml_count > 0:
@@ -282,7 +282,7 @@ def build_ic_description(
         for f_path, f_data in flows.items():
             if f_data.get("total_ics", 0) > 0:
                 xml_count += 1
-                lines.append(f"- [XML] {f_path}")
+                lines.append(f"* [XML] {f_path}")
                 lines.extend(format_flow_tags_lines(f_data))
         if xml_count > 0:
             lines.append(f"(Total de arquivos XML alterados: {xml_count})")
@@ -292,13 +292,13 @@ def build_ic_description(
         added_tags = parsed_metrics.get("added", {})
         removed_tags = parsed_metrics.get("removed", {})
         if added_tags:
-            lines.append(f"- Tags Adicionadas (+{added_cnt}):")
+            lines.append(f"* Tags Adicionadas (+{added_cnt}):")
             for t, c in sorted(added_tags.items(), key=lambda x: x[1], reverse=True):
-                lines.append(f"  * <{t}>: {c}")
+                lines.append(f"** <{t}>: {c}")
         if removed_tags:
-            lines.append(f"- Tags Removidas (-{removed_cnt}):")
+            lines.append(f"* Tags Removidas (-{removed_cnt}):")
             for t, c in sorted(removed_tags.items(), key=lambda x: x[1], reverse=True):
-                lines.append(f"  * <{t}>: {c}")
+                lines.append(f"** <{t}>: {c}")
 
     return "\n".join(lines)
 
