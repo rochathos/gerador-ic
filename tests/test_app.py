@@ -406,6 +406,62 @@ def test_commits_table_columns_selector():
     assert 'data-col="actions"' in res_commits.text
 
 
+def test_assegurar_banco_de_dados_existe_already_exists(monkeypatch):
+    """Test that assegurar_banco_de_dados_existe checks pg_database and skips creation if db exists."""
+    from unittest.mock import MagicMock
+    import psycopg2
+    from app.core.database import assegurar_banco_de_dados_existe
+
+    mock_conn = MagicMock()
+    mock_cursor = MagicMock()
+    mock_cursor.__enter__.return_value = mock_cursor
+    mock_cursor.fetchone.return_value = (1,)  # Database exists
+    mock_conn.cursor.return_value = mock_cursor
+
+    monkeypatch.setattr(psycopg2, "connect", lambda **kwargs: mock_conn)
+
+    assegurar_banco_de_dados_existe()
+    assert mock_cursor.execute.call_count == 1
+    # Ensure CREATE DATABASE was NOT executed
+    args, _ = mock_cursor.execute.call_args
+    assert "SELECT 1 FROM pg_database" in args[0]
+
+
+def test_assegurar_banco_de_dados_existe_creates_new(monkeypatch):
+    """Test that assegurar_banco_de_dados_existe executes CREATE DATABASE when database does not exist."""
+    from unittest.mock import MagicMock
+    import psycopg2
+    from app.core.database import assegurar_banco_de_dados_existe
+
+    mock_conn = MagicMock()
+    mock_cursor = MagicMock()
+    mock_cursor.__enter__.return_value = mock_cursor
+    mock_cursor.fetchone.return_value = None  # Database does not exist
+    mock_conn.cursor.return_value = mock_cursor
+
+    monkeypatch.setattr(psycopg2, "connect", lambda **kwargs: mock_conn)
+
+    assegurar_banco_de_dados_existe()
+    assert mock_cursor.execute.call_count == 2
+    create_call_args = mock_cursor.execute.call_args_list[1][0]
+    # Verify CREATE DATABASE statement
+    assert "CREATE DATABASE" in str(create_call_args[0])
+
+
+def test_assegurar_banco_de_dados_existe_handles_connection_error(monkeypatch):
+    """Test that assegurar_banco_de_dados_existe gracefully handles connection errors without halting."""
+    import psycopg2
+    from app.core.database import assegurar_banco_de_dados_existe
+
+    def mock_connect(**kwargs):
+        raise psycopg2.OperationalError("Simulated connection failure to postgres db")
+
+    monkeypatch.setattr(psycopg2, "connect", mock_connect)
+
+    # Should not raise exception
+    assegurar_banco_de_dados_existe()
+
+
 
 
 
