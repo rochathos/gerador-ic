@@ -1242,17 +1242,6 @@ function updateTableStatusCell(commit) {
   }
 }
 
-function updateCommitStatusCell(hash, isSaved) {
-  if (!hash) return;
-  const commit = window.COMMITS_STORE ? window.COMMITS_STORE[hash] : null;
-  if (commit) {
-    commit.is_saved = isSaved;
-    updateTableStatusCell(commit);
-  } else {
-    updateTableStatusCell({ hash: hash, is_saved: isSaved });
-  }
-}
-
 /**
  * Handle input changes in IC title, description, or redmine ID
  */
@@ -1908,19 +1897,6 @@ async function loadMoreCommits() {
     btn.disabled = false;
     if (spinner) spinner.classList.add("d-none");
   }
-}
-
-/**
- * Safe HTML escaping helper
- */
-function escapeHtml(text) {
-  if (!text) return "";
-  return String(text)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
 }
 
 /**

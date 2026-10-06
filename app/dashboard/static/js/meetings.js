@@ -298,26 +298,6 @@ async function executeMeetingICCreation(btn, isDryRun = false) {
   }
 }
 
-async function simulateTestCalls(btn) {
-  if (btn) {
-    btn.disabled = true;
-    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Gerando...';
-  }
-  try {
-    const res = await fetch("/api/meetings/simulate-test-calls", { method: "POST" });
-    const data = await res.json();
-    if (data.success) {
-      window.location.reload();
-    } else {
-      alert("Erro ao gerar chamadas de teste: " + data.message);
-      if (btn) btn.disabled = false;
-    }
-  } catch (err) {
-    alert("Falha de conexão: " + err.message);
-    if (btn) btn.disabled = false;
-  }
-}
-
 function openManualMeetingModal() {
   const modalEl = document.getElementById("manualCallModal");
   if (!modalEl) return;

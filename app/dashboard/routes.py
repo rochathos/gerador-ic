@@ -810,23 +810,6 @@ def api_commits_inspect(
         return JSONResponse(status_code=500, content={"success": False, "message": str(exc)})
 
 
-@router.get("/meetings", response_class=HTMLResponse)
-def meetings_view(request: Request, db: Session = Depends(get_db)):
-    """Render meetings list."""
-    stmt = select(Meeting).order_by(desc(Meeting.start_time))
-    meetings = list(db.execute(stmt).scalars().all())
-
-    return templates.TemplateResponse(
-        request=request,
-        name="meetings.html",
-        context={
-            "active_page": "meetings",
-            "meetings": meetings,
-            "author_name": settings.GIT_AUTHOR_NAME,
-        },
-    )
-
-
 @router.get("/catalog-items", response_class=HTMLResponse)
 def catalog_items_view(request: Request, db: Session = Depends(get_db)):
     """Render Catalog Items list."""
@@ -850,16 +833,6 @@ def catalog_items_view(request: Request, db: Session = Depends(get_db)):
             "author_name": settings.GIT_AUTHOR_NAME,
         },
     )
-
-
-@router.post("/catalog-items/{item_id}/approve")
-def approve_catalog_item(item_id: int, db: Session = Depends(get_db)):
-    """Approve a Catalog Item."""
-    item = db.get(CatalogItem, item_id)
-    if item:
-        item.status = "aprovado"
-        db.commit()
-    return RedirectResponse(url="/catalog-items", status_code=303)
 
 
 @router.post("/catalog-items/{item_id}/delete")
@@ -1078,37 +1051,6 @@ async def api_create_meeting_manual(
         return JSONResponse(status_code=200, content={"success": True, "message": "Chamada registrada com sucesso!"})
     except Exception as exc:
         return JSONResponse(status_code=500, content={"success": False, "message": str(exc)})
-
-
-@router.post("/api/meetings/simulate-test-calls")
-def api_simulate_test_calls(db: Session = Depends(get_db)):
-    """Seed 3 realistic sample calls for immediate testing."""
-    now = datetime.now()
-    sample_calls = [
-        {
-            "contact_name": "Lucas Oliveira (Dev PJe)",
-            "title": "Alinhamento técnico sobre Fluxos e Transições XML",
-            "call_type": "efetuada",
-            "duration": "35m 10s",
-            "start_time": (now - timedelta(hours=2)).isoformat(),
-        },
-        {
-            "contact_name": "Mariana Souza (QA / Testes)",
-            "title": "Pareamento para validação de evidência de deploy",
-            "call_type": "recebida",
-            "duration": "24m 45s",
-            "start_time": (now - timedelta(hours=5)).isoformat(),
-        },
-        {
-            "contact_name": "Equipe PJe TJCE",
-            "title": "Reunião de alinhamento de sustentação e correções",
-            "call_type": "reuniao",
-            "duration": "50m 00s",
-            "start_time": (now - timedelta(days=1, hours=3)).isoformat(),
-        },
-    ]
-    created, updated = MeetingService.import_teams_calls(db, sample_calls)
-    return JSONResponse(status_code=200, content={"success": True, "count": created, "message": f"{created} chamadas de teste geradas com sucesso!"})
 
 
 @router.post("/api/meetings/create-ic")

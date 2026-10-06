@@ -93,9 +93,7 @@ productivity_assistant/
 │   │   ├── git_service.py        # Leitura GitPython e persistência
 │   │   ├── meeting_service.py    # Gestão de reuniões (Teams ready)
 │   │   ├── catalog_generator_service.py # Agrupamento e sugestões de IC
-│   │   ├── selenium_service.py   # Gerenciamento do WebDriver
-│   │   ├── redmine_service.py    # Automação do Redmine
-│   │   ├── screenshot_service.py # Captura de evidências visuais
+│   │   ├── redmine_service.py    # Integração oficial REST com Redmine
 │   │   └── report_service.py     # Exportação Excel e PDF
 │   │
 │   └── dashboard/                # Camada web FastAPI
@@ -105,13 +103,11 @@ productivity_assistant/
 │       │   ├── index.html
 │       │   ├── commits.html
 │       │   ├── meetings.html
-│       │   ├── catalog_items.html
 │       │   └── history.html
 │       └── static/               # Assets estáticos
 │           ├── css/custom.css    # Estilização Glassmorphism Dark
 │           └── js/main.js        # Utilitários de filtros e modais
 │
-├── screenshots/                  # Evidências salvas das criações
 ├── reports/                      # Relatórios gerados em PDF e Excel
 ├── logs/                         # Arquivos de log (app.log)
 ├── tests/                        # Testes automatizados (pytest)
@@ -119,7 +115,7 @@ productivity_assistant/
 │   └── test_git_service.py
 │
 ├── .env                          # Variáveis de ambiente locais
-├── .env.example                  # Template de configuração
+├── .env.exemplo                  # Template de configuração
 ├── .gitignore
 ├── alembic.ini                   # Configuração do Alembic
 ├── pytest.ini                    # Configuração de testes

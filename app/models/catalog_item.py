@@ -30,7 +30,6 @@ class CatalogItem(Base):
 
     # Relationships
     execution: Mapped[Optional["ExecutionHistory"]] = relationship("ExecutionHistory", back_populates="catalog_items")
-    evidences: Mapped[List["Evidence"]] = relationship("Evidence", back_populates="catalog_item", cascade="all, delete-orphan")
 
     def __repr__(self) -> str:
         return f"<CatalogItem id={self.id} status={self.status} natureza={self.natureza} redmine_id={self.redmine_id} title={self.title[:30]}>"

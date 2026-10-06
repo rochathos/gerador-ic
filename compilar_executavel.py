@@ -39,8 +39,6 @@ def executar_compilacao_pyinstaller(diretorio_base: Path, caminho_dist: Path) ->
         "--add-data",
         "app/dashboard/static;app/dashboard/static",
         "--collect-all",
-        "selenium",
-        "--collect-all",
         "uvicorn",
         "--collect-all",
         "psycopg2",

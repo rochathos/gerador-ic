@@ -274,6 +274,16 @@ def test_import_teams_calls_17_minutes():
     assert "Colega Teste 17m" in meetings_page.text
     assert "17m" in meetings_page.text
 
+    # 4. Clean up test meeting
+    from app.core.database import SessionLocal
+    from app.models.meeting import Meeting
+    db = SessionLocal()
+    try:
+        db.query(Meeting).filter(Meeting.contact_name == "Colega Teste 17m").delete()
+        db.commit()
+    finally:
+        db.close()
+
 
 def test_meeting_is_saved_status_and_card_layout():
     """Verify that a meeting saved in DB shows 'Salvo' status and matching meetings inherit saved status."""
@@ -349,6 +359,7 @@ def test_meeting_is_saved_status_and_card_layout():
         # Clean up
         db.delete(m1)
         db.delete(m2)
+        db.query(CatalogItem).filter(CatalogItem.title == "Alinhamento com Fulano de Tal").delete()
         db.commit()
     finally:
         db.close()
