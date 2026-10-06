@@ -15,6 +15,13 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 
+# Configurar saída do console para UTF-8 compatível com Windows
+if sys.stdout and hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 
 def obter_versao_atual(diretorio_base: Path) -> str:
     """Lê a versão atual definida em app/__init__.py."""
@@ -285,25 +292,25 @@ def iniciar_processo_compilacao() -> None:
             arquivo_zip = gerar_pacote_zip(pasta_gerada, caminho_dist, versao_limpa)
 
         print("\n" + "=" * 75)
-        print("🎉 [SUCESSO] COMPILAÇÃO CONCLUÍDA COM SUCESSO!")
-        print(f"[+] Versão do executável: v{versao_limpa}")
-        print(f"[+] Ícone embutido: {caminho_icone}")
-        print(f"[+] Pasta do executável: {pasta_gerada}")
+        print("[SUCESSO] COMPILACAO CONCLUIDA COM SUCESSO!")
+        print(f"[+] Versao do executavel: v{versao_limpa}")
+        print(f"[+] Icone embutido: {caminho_icone}")
+        print(f"[+] Pasta do executavel: {pasta_gerada}")
         print(f"[+] Arquivo principal: {pasta_gerada / 'ProductivityAssistant.exe'}")
         if arquivo_zip:
             print(f"[+] Pacote ZIP para compartilhamento: {arquivo_zip}")
 
-        print("\n[+] Instruções para envio ao seu time:")
+        print("\n[+] Instrucoes para envio ao seu time:")
         if arquivo_zip:
             print(f"    1. Envie o arquivo '{arquivo_zip.name}' para seus colegas de equipe;")
         else:
             print("    1. Compacte a pasta 'ProductivityAssistant' em um arquivo .zip e envie;")
         print("    2. O colega descompacta, renomeia '.env.exemplo' para '.env', preenche os dados e executa;")
-        print("    3. O executável abre com ícone próprio do Git/IC, terminal de logs e o navegador em http://127.0.0.1:8000 automaticamente!")
+        print("    3. O executavel abre com icone proprio do Git/IC, terminal de logs e o navegador em http://127.0.0.1:8000 automaticamente!")
         print("=" * 75)
     else:
         print("\n" + "=" * 75)
-        print("❌ FALHA NA COMPILAÇÃO DO EXECUTÁVEL.")
+        print("[FALHA] FALHA NA COMPILACAO DO EXECUTAVEL.")
         print("Verifique os logs acima para detalhes do erro.")
         print("=" * 75)
         sys.exit(1)
