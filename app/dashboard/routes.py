@@ -22,7 +22,25 @@ from app.services.meeting_service import MeetingService
 
 router = APIRouter()
 
-templates_dir = Path(__file__).parent / "templates"
+
+def obter_diretorio_templates() -> Path:
+    """Retorna o caminho correto para o diretório de templates Jinja2 tanto em dev quanto em executável compilado."""
+    import sys
+    if hasattr(sys, "_MEIPASS"):
+        candidato_meipass = Path(sys._MEIPASS) / "app" / "dashboard" / "templates"
+        if candidato_meipass.exists():
+            return candidato_meipass
+    caminho_local = Path(__file__).resolve().parent / "templates"
+    if caminho_local.exists():
+        return caminho_local
+    from app.core.config import BASE_DIR
+    caminho_base = BASE_DIR / "app" / "dashboard" / "templates"
+    if caminho_base.exists():
+        return caminho_base
+    return caminho_local
+
+
+templates_dir = obter_diretorio_templates()
 templates = Jinja2Templates(directory=str(templates_dir))
 
 

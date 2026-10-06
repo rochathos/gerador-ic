@@ -65,18 +65,67 @@ async def add_private_network_access_headers(request, call_next):
     response.headers["Access-Control-Allow-Private-Network"] = "true"
     return response
 
+import sys
+import threading
+import webbrowser
+
+
+def obter_diretorio_estaticos() -> Path:
+    """Retorna o diretório de arquivos estáticos tanto em ambiente de desenvolvimento quanto compilado."""
+    if hasattr(sys, "_MEIPASS"):
+        candidato_meipass = Path(sys._MEIPASS) / "app" / "dashboard" / "static"
+        if candidato_meipass.exists():
+            return candidato_meipass
+    caminho_local = Path(__file__).resolve().parent / "app" / "dashboard" / "static"
+    if caminho_local.exists():
+        return caminho_local
+    caminho_base = settings.BASE_DIR / "app" / "dashboard" / "static"
+    if caminho_base.exists():
+        return caminho_base
+    return caminho_local
+
+
 # Mount static files
-static_dir = Path(__file__).resolve().parent / "app" / "dashboard" / "static"
+static_dir = obter_diretorio_estaticos()
 app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
 # Include dashboard and API routes
 app.include_router(dashboard_router)
 
 
+def abrir_navegador_ao_iniciar(url: str, atraso_segundos: float = 1.5) -> None:
+    """Abre o navegador padrão automaticamente após a inicialização do servidor."""
+    def _abrir():
+        try:
+            webbrowser.open(url)
+        except Exception as erro:
+            logger.warning(f"Não foi possível abrir o navegador automaticamente: {erro}")
+
+    temporizador = threading.Timer(atraso_segundos, _abrir)
+    temporizador.daemon = True
+    temporizador.start()
+
+
 if __name__ == "__main__":
-    uvicorn.run(
-        "main:app",
-        host=settings.APP_HOST,
-        port=settings.APP_PORT,
-        reload=settings.APP_DEBUG,
-    )
+    eh_compilado = hasattr(sys, "frozen") or hasattr(sys, "__compiled__") or "__compiled__" in globals()
+    url_aplicacao = f"http://{settings.APP_HOST}:{settings.APP_PORT}"
+
+    # Dispara abertura automática do navegador
+    abrir_navegador_ao_iniciar(url_aplicacao)
+
+    if eh_compilado:
+        # Em modo executável compilado, passa a instância do app diretamente e desativa reload
+        uvicorn.run(
+            app,
+            host=settings.APP_HOST,
+            port=settings.APP_PORT,
+            reload=False,
+            log_level="info",
+        )
+    else:
+        uvicorn.run(
+            "main:app",
+            host=settings.APP_HOST,
+            port=settings.APP_PORT,
+            reload=settings.APP_DEBUG,
+        )

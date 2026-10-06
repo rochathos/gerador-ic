@@ -1,16 +1,35 @@
+import sys
 from pathlib import Path
 from typing import Optional
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-BASE_DIR = Path(__file__).resolve().parent.parent.parent
+def obter_diretorio_base() -> Path:
+    """Retorna o diretório base da aplicação considerando execução em código-fonte ou executável compilado."""
+    if hasattr(sys, "frozen") or "__compiled__" in globals() or hasattr(sys, "__compiled__"):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent.parent.parent
+
+
+BASE_DIR = obter_diretorio_base()
+
+
+def obter_caminho_arquivo_env() -> str:
+    """Localiza o arquivo .env no diretório de execução atual ou no diretório base."""
+    candidato_local = Path.cwd() / ".env"
+    if candidato_local.exists():
+        return str(candidato_local)
+    candidato_base = BASE_DIR / ".env"
+    if candidato_base.exists():
+        return str(candidato_base)
+    return str(candidato_base)
 
 
 class Settings(BaseSettings):
     """Productivity Assistant configuration settings loaded from environment/.env."""
 
     model_config = SettingsConfigDict(
-        env_file=str(BASE_DIR / ".env"),
+        env_file=obter_caminho_arquivo_env(),
         env_file_encoding="utf-8",
         extra="ignore",
     )

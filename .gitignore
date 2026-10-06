@@ -30,6 +30,8 @@ ENV/
 # Environment Variables
 .env
 !.env.example
+!.env.exemplo
+*.spec
 
 # IDE
 .vscode/
