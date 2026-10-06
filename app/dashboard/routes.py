@@ -16,7 +16,6 @@ from app.models.meeting import Meeting
 from app.models.catalog_item import CatalogItem
 from app.models.execution_history import ExecutionHistory
 from app.services.git_service import GitService
-from app.services.catalog_generator_service import CatalogGeneratorService
 from app.services.report_service import ReportService
 from app.services.redmine_service import RedmineService
 from app.services.meeting_service import MeetingService
@@ -169,9 +168,6 @@ def home_view(
     # Fetch metric totals
     total_commits = len(commits)
     total_meetings = db.execute(select(func.count(Meeting.id))).scalar() or 0
-    total_suggested_ics = (
-        db.execute(select(func.count(CatalogItem.id)).where(CatalogItem.status.in_(["salvo", "sugerido"]))).scalar() or 0
-    )
     total_created_ics = (
         db.execute(select(func.count(CatalogItem.id)).where(CatalogItem.status == "criado")).scalar() or 0
     )
@@ -188,7 +184,6 @@ def home_view(
             "latest_execution": latest_exec,
             "total_commits": total_commits,
             "total_meetings": total_meetings,
-            "total_suggested_ics": total_suggested_ics,
             "total_created_ics": total_created_ics,
             "commits": commits,
             "is_live_query": is_live_query,
@@ -739,25 +734,6 @@ def catalog_items_view(request: Request, db: Session = Depends(get_db)):
             "filter_q": "",
             "author_name": settings.GIT_AUTHOR_NAME,
         },
-    )
-
-
-@router.post("/generate-ics")
-def generate_ics(db: Session = Depends(get_db)):
-    """Generate Catalog Item suggestions from commits in DB."""
-    commits = list(db.execute(select(Commit).order_by(desc(Commit.commit_date)).limit(50)).scalars().all())
-    if not commits:
-        return RedirectResponse(
-            url="/catalog-items?alert_message=Nenhum+commit+encontrado+para+gerar+sugestões&alert_type=warning",
-            status_code=303,
-        )
-
-    suggestions = CatalogGeneratorService.generate_suggestions(commits=commits)
-    CatalogGeneratorService.save_suggestions(db=db, suggestions=suggestions)
-
-    return RedirectResponse(
-        url="/catalog-items?alert_message=Sugestões+de+IC+geradas+com+sucesso!&alert_type=success",
-        status_code=303,
     )
 
 

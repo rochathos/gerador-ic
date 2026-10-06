@@ -17,14 +17,6 @@
 
     <!-- Quick action buttons -->
     <div class="d-flex flex-wrap gap-2">
-      <a href="/catalog-items" class="btn btn-secondary-custom d-flex align-items-center gap-2">
-        <i class="bi bi-magic text-warning"></i>
-        <span>Gerar Sugestões</span>
-      </a>
-      <a href="/catalog-items" class="btn btn-secondary-custom d-flex align-items-center gap-2">
-        <i class="bi bi-box-arrow-up-right text-info"></i>
-        <span>Criar ICs no Redmine</span>
-      </a>
       <div class="dropdown">
         <button class="btn btn-secondary-custom dropdown-toggle d-flex align-items-center gap-2" type="button" data-bs-toggle="dropdown">
           <i class="bi bi-download text-success"></i>
@@ -39,7 +31,7 @@
   </div>
 
   <!-- KPI / Metric Cards -->
-  <div class="col-12 col-sm-6 col-xl-3">
+  <div class="col-12 col-md-4">
     <div class="card-glass stat-card">
       <div class="d-flex justify-content-between align-items-start mb-2">
         <div>
@@ -56,7 +48,7 @@
     </div>
   </div>
 
-  <div class="col-12 col-sm-6 col-xl-3">
+  <div class="col-12 col-md-4">
     <div class="card-glass stat-card">
       <div class="d-flex justify-content-between align-items-start mb-2">
         <div>
@@ -73,24 +65,7 @@
     </div>
   </div>
 
-  <div class="col-12 col-sm-6 col-xl-3">
-    <div class="card-glass stat-card">
-      <div class="d-flex justify-content-between align-items-start mb-2">
-        <div>
-          <div class="stat-label">ICs Sugeridos</div>
-          <div class="stat-value">{{ total_suggested_ics or 0 }}</div>
-        </div>
-        <div class="stat-icon warning">
-          <i class="bi bi-lightbulb"></i>
-        </div>
-      </div>
-      <div class="text-muted small d-flex align-items-center gap-1">
-        <i class="bi bi-arrow-right"></i> Aguardando aprovação
-      </div>
-    </div>
-  </div>
-
-  <div class="col-12 col-sm-6 col-xl-3">
+  <div class="col-12 col-md-4">
     <div class="card-glass stat-card">
       <div class="d-flex justify-content-between align-items-start mb-2">
         <div>
