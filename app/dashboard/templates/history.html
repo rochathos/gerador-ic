@@ -126,7 +126,7 @@
               <th style="width: 175px;">Nº Redmine</th>
               <th>Descrição Gerada</th>
               <th style="width: 130px;" class="text-center">Status</th>
-              <th style="width: 160px;" class="text-end">Ações</th>
+              <th style="width: 120px;" class="text-end">Ações</th>
             </tr>
           </thead>
           <tbody>
@@ -141,11 +141,6 @@
                   {% if ic.commit_hash %}
                   <div class="d-flex align-items-center gap-1">
                     <span class="badge-hash font-monospace">{{ ic.commit_hash[:7] }}</span>
-                    <button type="button" class="btn btn-link btn-sm p-0 text-info"
-                            onclick="openCreateICByHash('{{ ic.commit_hash }}', '{{ ic.natureza or 'fluxo' }}')"
-                            title="Inspecionar / Editar IC deste commit">
-                      <i class="bi bi-box-arrow-up-right fs-6"></i>
-                    </button>
                     <button type="button" class="btn btn-link btn-sm p-0 text-muted copy-btn" data-copy="{{ ic.commit_hash }}" title="Copiar hash completo">
                       <i class="bi bi-clipboard" style="font-size: 0.75rem;"></i>
                     </button>
@@ -213,11 +208,6 @@
                     <button type="button" class="btn btn-outline-info copy-btn py-1 px-2" data-copy="TÍTULO:&#10;{{ ic.title }}&#10;&#10;DESCRIÇÃO:&#10;{{ ic.description }}" title="Copiar Título e Descrição para Redmine">
                       <i class="bi bi-clipboard"></i> Copiar
                     </button>
-                    {% if ic.commit_hash %}
-                    <button type="button" class="btn btn-outline-primary py-1 px-2" onclick="openCreateICByHash('{{ ic.commit_hash }}')" title="Ver no Modal / Criar no Redmine">
-                      <i class="bi bi-pencil-square"></i>
-                    </button>
-                    {% endif %}
                     <form method="POST" action="/catalog-items/{{ ic.id }}/delete" class="d-inline" onsubmit="return confirm('Deseja realmente excluir este Item de Catálogo #{{ ic.id }}?');">
                       <button type="submit" class="btn btn-outline-danger py-1 px-2" title="Excluir IC do Banco">
                         <i class="bi bi-trash"></i>
