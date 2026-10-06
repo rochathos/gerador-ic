@@ -6,6 +6,7 @@ from app.services.selenium_service import SeleniumService
 from app.services.redmine_service import RedmineService
 from app.services.screenshot_service import ScreenshotService
 from app.services.report_service import ReportService
+from app.services.sql_analyzer_service import SqlAnalyzerService
 
 __all__ = [
     "GitService",
@@ -15,4 +16,5 @@ __all__ = [
     "RedmineService",
     "ScreenshotService",
     "ReportService",
+    "SqlAnalyzerService",
 ]

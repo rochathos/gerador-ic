@@ -122,13 +122,51 @@
             </div>
           </div>
 
-          <!-- Detalhamento de ICs conforme regra icf.sh -->
+          <!-- Alerta quando commit tem ambos os ajustes -->
+          <div id="icDualNatureAlert" class="alert alert-primary bg-primary bg-opacity-10 border-primary border-opacity-25 p-2 mb-3 small d-none">
+            <div class="d-flex align-items-center gap-2">
+              <i class="bi bi-info-circle-fill text-primary fs-5"></i>
+              <div>
+                <strong>Commit com XML e SQL detectados!</strong> Este commit requer a geração de <b>2 Redmines independentes</b> (Catálogo da Funcionalidade + Scripts de Banco de Dados). Ao clicar no botão <b>Criar no Redmine</b>, ambos serão gerados automaticamente.
+              </div>
+            </div>
+          </div>
+
+          <!-- Seletor de Prévia (apenas exibido quando o commit tem XML e SQL simultâneos) -->
+          <div id="icNatureSelectorContainer" class="d-flex gap-2 mb-3 p-1 rounded bg-dark border border-secondary border-opacity-50 d-none">
+            <button type="button" class="btn btn-sm flex-fill fw-bold d-flex align-items-center justify-content-center gap-2 py-2" id="btnSelectIcFluxo" onclick="switchICNature('fluxo')">
+              <i class="bi bi-diagram-3-fill text-warning"></i>
+              <span>1. Catálogo / Fluxo (XML)</span>
+              <span id="badgeNatureFluxoCount" class="badge bg-warning text-dark">0 ICs</span>
+              <span id="badgeNatureFluxoStatus" class="badge bg-secondary d-none">#</span>
+            </button>
+            <button type="button" class="btn btn-sm flex-fill fw-bold d-flex align-items-center justify-content-center gap-2 py-2" id="btnSelectIcSql" onclick="switchICNature('sql')">
+              <i class="bi bi-database-fill text-info"></i>
+              <span>2. Banco de Dados (SQL)</span>
+              <span id="badgeNatureSqlCount" class="badge text-dark" style="background-color: #22d3ee;">0 ICs</span>
+              <span id="badgeNatureSqlStatus" class="badge bg-secondary d-none">#</span>
+            </button>
+          </div>
+
+          <!-- Info da Atividade Redmine (#455) -->
+          <div class="mb-3 p-2 rounded bg-dark bg-opacity-50 border border-secondary border-opacity-25 d-flex align-items-center justify-content-between small">
+            <div>
+              <span class="text-muted fw-bold">ATIVIDADE REDMINE (#455):</span>
+              <span id="icDisplayActivityType" class="text-light fw-semibold ms-2">Desenvolvimento - Criar/Manter tarefa de automação</span>
+            </div>
+            <span id="icNatureBadge" class="badge bg-warning text-dark fw-bold">FLUXO</span>
+          </div>
+
+          <input type="hidden" id="icInputNatureza" value="fluxo">
+          <input type="hidden" id="icInputActivityType" value="Desenvolvimento - Criar/Manter tarefa de automação">
+
+          <!-- Detalhamento de ICs conforme regra icf.sh ou regras SQL -->
           <div id="icTagsAlert" class="alert alert-warning bg-warning bg-opacity-10 border-warning border-opacity-25 p-3 mb-3 small d-none">
             <div class="fw-bold d-flex align-items-center justify-content-between text-warning mb-1">
               <span><i class="bi bi-tag-fill me-1"></i> <span id="icCountText">0 ICs calculados</span></span>
-              <span class="badge bg-warning text-dark fw-bold">Regras do Catálogo (PJE)</span>
+              <span class="badge bg-warning text-dark fw-bold" id="icRulesBadge">Regras do Catálogo (PJE)</span>
             </div>
-            <div class="text-muted small mb-1" style="font-size:0.75rem;">Detalhamento das tags XML calculadas (Adições / Remoções - excluindo estruturais):</div>
+            <div class="text-muted small mb-1" id="icBreakdownSubtitle" style="font-size:0.75rem;">Detalhamento das tags XML calculadas (Adições / Remoções - excluindo estruturais):</div>
             <div class="text-light small d-flex flex-wrap gap-1" id="icTagsDetail"></div>
           </div>
 

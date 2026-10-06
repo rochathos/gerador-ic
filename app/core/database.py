@@ -42,9 +42,15 @@ def init_db() -> None:
             from sqlalchemy import text
             with engine.connect() as conn:
                 conn.execute(text("ALTER TABLE commits ADD COLUMN IF NOT EXISTS branch VARCHAR(255);"))
+                conn.execute(text("ALTER TABLE commits ADD COLUMN IF NOT EXISTS sql_scripts_metrics JSON;"))
+                conn.execute(text("ALTER TABLE commits ADD COLUMN IF NOT EXISTS ic_count_xml INTEGER DEFAULT 0;"))
+                conn.execute(text("ALTER TABLE commits ADD COLUMN IF NOT EXISTS ic_count_sql INTEGER DEFAULT 0;"))
+                conn.execute(text("ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS natureza VARCHAR(50);"))
+                conn.execute(text("ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS activity_type VARCHAR(255);"))
+                conn.execute(text("ALTER TABLE catalog_items ADD COLUMN IF NOT EXISTS ic_count INTEGER DEFAULT 1;"))
                 conn.commit()
         except Exception as col_err:
-            logger.debug(f"Verificação de coluna branch: {col_err}")
+            logger.debug(f"Verificação de colunas de banco: {col_err}")
         logger.info("Tabelas do PostgreSQL verificadas/criadas com sucesso.")
     except Exception as exc:
         logger.error(f"Erro ao inicializar tabelas no PostgreSQL: {exc}")

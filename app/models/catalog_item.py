@@ -18,6 +18,9 @@ class CatalogItem(Base):
         String(50), default="salvo", nullable=False, index=True
     )  # salvo, criado, ignorado, sugerido
     commit_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
+    natureza: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, index=True)  # fluxo, sql
+    activity_type: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    ic_count: Mapped[Optional[int]] = mapped_column(Integer, default=1, nullable=True)
     execution_id: Mapped[Optional[int]] = mapped_column(
         Integer, ForeignKey("execution_history.id", ondelete="SET NULL"), nullable=True, index=True
     )
@@ -30,4 +33,5 @@ class CatalogItem(Base):
     evidences: Mapped[List["Evidence"]] = relationship("Evidence", back_populates="catalog_item", cascade="all, delete-orphan")
 
     def __repr__(self) -> str:
-        return f"<CatalogItem id={self.id} status={self.status} title={self.title[:30]}>"
+        return f"<CatalogItem id={self.id} status={self.status} natureza={self.natureza} redmine_id={self.redmine_id} title={self.title[:30]}>"
+

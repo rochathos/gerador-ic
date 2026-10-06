@@ -262,12 +262,14 @@ class GitService:
 
                 filename = display_path.replace("\\", "/").split("/")[-1]
                 is_xml = display_path.lower().endswith(".xml")
+                is_sql = display_path.lower().endswith(".sql")
 
                 files_changed.append({
                     "path": display_path,
                     "old_path": old_path,
                     "filename": filename,
                     "is_xml": is_xml,
+                    "is_sql": is_sql,
                     "is_rename": is_rename,
                     "status": status[0] if status else "M",
                     "insertions": ins,
@@ -277,6 +279,70 @@ class GitService:
         except Exception as exc:
             logger.debug(f"Erro ao extrair diff_tree para commit {commit_hash[:7]}: {exc}")
         return files_changed
+
+    @classmethod
+    def analisar_scripts_sql_commit(cls, repo: git.Repo, commit_hash: str) -> Dict[str, Any]:
+        """Analisa os arquivos .sql alterados no commit e extrai os casos de uso de banco de dados."""
+        from app.services.sql_analyzer_service import SqlAnalyzerService
+
+        try:
+            patch = repo.git.show(commit_hash, "-M", "--", "*.sql")
+        except Exception as exc:
+            logger.debug(f"Erro ao extrair diff SQL para o commit {commit_hash}: {exc}")
+            patch = ""
+
+        if not patch or not patch.strip():
+            return {
+                "arquivos": {},
+                "casos_de_uso": [],
+                "use_cases": [],
+                "total_ics": 0,
+                "operacoes": {"criar": 0, "alterar": 0, "excluir": 0, "consultar": 0},
+                "tabelas": [],
+            }
+
+        file_diffs = re.split(r"(?=diff --git )", patch)
+        arquivos_map: Dict[str, Any] = {}
+        todos_casos: List[str] = []
+        todas_tabelas: List[str] = []
+        tot_operacoes: Dict[str, int] = {"criar": 0, "alterar": 0, "excluir": 0, "consultar": 0}
+
+        for fd in file_diffs:
+            if not fd.strip():
+                continue
+            first_line = fd.strip().splitlines()[0]
+            m_path = re.search(r"diff --git [ab]/(.*?) [ab]/(.*)", first_line)
+            file_path = m_path.group(2) if m_path else "script.sql"
+            clean_file_path = cls.decode_git_path(file_path)
+
+            analise_arq = SqlAnalyzerService.processar_diff_sql(fd)
+            if analise_arq["total_ics"] > 0:
+                arquivos_map[clean_file_path] = analise_arq
+                for c in analise_arq["casos_de_uso"]:
+                    if c not in todos_casos:
+                        todos_casos.append(c)
+                for t in analise_arq["tabelas"]:
+                    if t not in todas_tabelas:
+                        todas_tabelas.append(t)
+                for op, cnt in analise_arq["operacoes"].items():
+                    tot_operacoes[op] = tot_operacoes.get(op, 0) + cnt
+
+        if not arquivos_map and patch.strip():
+            analise_global = SqlAnalyzerService.processar_diff_sql(patch)
+            if analise_global["total_ics"] > 0:
+                arquivos_map["scripts.sql"] = analise_global
+                todos_casos = analise_global["casos_de_uso"]
+                todas_tabelas = analise_global["tabelas"]
+                tot_operacoes = analise_global["operacoes"]
+
+        return {
+            "arquivos": arquivos_map,
+            "casos_de_uso": todos_casos,
+            "use_cases": todos_casos,
+            "total_ics": len(todos_casos),
+            "operacoes": tot_operacoes,
+            "tabelas": todas_tabelas,
+        }
 
     @staticmethod
     def validate_repository(repo_path: str | Path) -> Tuple[bool, str]:
@@ -520,7 +586,7 @@ class GitService:
         end_date: Optional[datetime] = None,
         author: Optional[str] = None,
         branch: Optional[str] = None,
-        analyze_xml: bool = False,
+        analyze_xml: bool = True,
     ) -> List[Dict[str, Any]]:
         """Fetch commits in the specified period, optionally filtered by author and branch."""
         path = Path(repo_path).resolve()
@@ -590,6 +656,11 @@ class GitService:
                     for f in files_changed
                     if isinstance(f, dict)
                 )
+                has_sql = any(
+                    f.get("is_sql") or cls.decode_git_path(str(f.get("path", ""))).lower().endswith(".sql")
+                    for f in files_changed
+                    if isinstance(f, dict)
+                )
                 xml_analysis = cls.analyze_commit_xml_tags(repo, commit.hexsha) if (has_xml and analyze_xml) else {
                     "added": {},
                     "removed": {},
@@ -598,6 +669,19 @@ class GitService:
                     "total_ics": 0,
                     "flows": {},
                 }
+                sql_analysis = cls.analisar_scripts_sql_commit(repo, commit.hexsha) if has_sql else {
+                    "arquivos": {},
+                    "casos_de_uso": [],
+                    "total_ics": 0,
+                    "operacoes": {},
+                }
+
+                total_xml_ics = xml_analysis.get("total_ics", 0)
+                if total_xml_ics == 0 and has_xml:
+                    total_xml_ics = 1
+                total_sql_ics = sql_analysis.get("total_ics", 0)
+                if total_sql_ics == 0 and has_sql:
+                    total_sql_ics = 1
 
                 commit_author_display = f"{commit.author.name} <{commit.author.email}>" if commit.author.email else commit.author.name
                 commit_url = cls.get_commit_url(path, commit.hexsha)
@@ -617,7 +701,10 @@ class GitService:
                         "branch": commit_branch,
                         "commit_url": commit_url,
                         "xml_tags_metrics": xml_analysis,
-                        "ic_count": xml_analysis["total_ics"],
+                        "sql_scripts_metrics": sql_analysis,
+                        "ic_count_xml": total_xml_ics,
+                        "ic_count_sql": total_sql_ics,
+                        "ic_count": total_xml_ics + total_sql_ics,
                     }
                 )
 
@@ -643,6 +730,7 @@ class GitService:
             files_changed = cls.get_commit_files(repo, c.hexsha)
 
             has_xml = any(f.get("is_xml") for f in files_changed)
+            has_sql = any(f.get("is_sql") for f in files_changed)
             xml_analysis = cls.analyze_commit_xml_tags(repo, c.hexsha) if has_xml else {
                 "added": {},
                 "removed": {},
@@ -651,6 +739,18 @@ class GitService:
                 "total_ics": 0,
                 "flows": {},
             }
+            sql_analysis = cls.analisar_scripts_sql_commit(repo, c.hexsha) if has_sql else {
+                "arquivos": {},
+                "casos_de_uso": [],
+                "total_ics": 0,
+                "operacoes": {},
+            }
+            total_xml_ics = xml_analysis.get("total_ics", 0)
+            if total_xml_ics == 0 and has_xml:
+                total_xml_ics = 1
+            total_sql_ics = sql_analysis.get("total_ics", 0)
+            if total_sql_ics == 0 and has_sql:
+                total_sql_ics = 1
             author_display = f"{c.author.name} <{c.author.email}>" if c.author.email else c.author.name
             return {
                 "hash": c.hexsha,
@@ -665,7 +765,10 @@ class GitService:
                 "branch": cls.get_commit_branch(path, c.hexsha),
                 "commit_url": cls.get_commit_url(path, c.hexsha),
                 "xml_tags_metrics": xml_analysis,
-                "ic_count": xml_analysis["total_ics"],
+                "sql_scripts_metrics": sql_analysis,
+                "ic_count_xml": total_xml_ics,
+                "ic_count_sql": total_sql_ics,
+                "ic_count": total_xml_ics + total_sql_ics,
             }
         except Exception as exc:
             logger.debug(f"Commit {commit_hash} não encontrado diretamente no Git: {exc}")
@@ -683,7 +786,7 @@ class GitService:
         only_xml: bool = False,
         skip: int = 0,
         limit: int = 20,
-        analyze_xml: bool = False,
+        analyze_xml: bool = True,
     ) -> Tuple[List[Dict[str, Any]], bool]:
         """Fetch a page of commits directly from Git with lazy-loading support without saving to database."""
         path = Path(repo_path).resolve()
@@ -769,6 +872,7 @@ class GitService:
                 break
 
             has_xml = any(f.get("is_xml") for f in files_changed)
+            has_sql = any(f.get("is_sql") for f in files_changed)
             xml_analysis = cls.analyze_commit_xml_tags(repo, commit.hexsha) if (has_xml and analyze_xml) else {
                 "added": {},
                 "removed": {},
@@ -777,6 +881,18 @@ class GitService:
                 "total_ics": 0,
                 "flows": {},
             }
+            sql_analysis = cls.analisar_scripts_sql_commit(repo, commit.hexsha) if has_sql else {
+                "arquivos": {},
+                "casos_de_uso": [],
+                "total_ics": 0,
+                "operacoes": {},
+            }
+            total_xml_ics = xml_analysis.get("total_ics", 0)
+            if total_xml_ics == 0 and has_xml:
+                total_xml_ics = 1
+            total_sql_ics = sql_analysis.get("total_ics", 0)
+            if total_sql_ics == 0 and has_sql:
+                total_sql_ics = 1
             author_display = f"{c_author_name} <{c_author_email}>" if c_author_email else c_author_name
             commit_branch = clean_b if (clean_b and clean_b.upper() not in ["ALL", "TODAS"]) else cls.get_commit_branch(path, commit.hexsha)
 
@@ -793,7 +909,10 @@ class GitService:
                 "branch": commit_branch,
                 "commit_url": cls.get_commit_url(path, commit.hexsha),
                 "xml_tags_metrics": xml_analysis,
-                "ic_count": xml_analysis["total_ics"],
+                "sql_scripts_metrics": sql_analysis,
+                "ic_count_xml": total_xml_ics,
+                "ic_count_sql": total_sql_ics,
+                "ic_count": total_xml_ics + total_sql_ics,
             })
 
         return matched_commits, has_more

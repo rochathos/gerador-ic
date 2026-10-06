@@ -4,6 +4,7 @@
 
 document.addEventListener("DOMContentLoaded", () => {
   initCommitsStore();
+  setupColumnSelectors();
   setupQuickFilters();
   setupClipboardCopy();
   setupSearchForm();
@@ -34,9 +35,129 @@ function initCommitsStore() {
 }
 
 /**
+ * Configuration & Definition of Visible Columns in Commits Tables
+ */
+const COMMITS_COLUMNS_DEF = [
+  { key: 'hash', label: 'Hash', icon: 'bi-hash', default: true },
+  { key: 'date', label: 'Data / Hora', icon: 'bi-calendar3', default: true },
+  { key: 'author', label: 'Autor', icon: 'bi-person', default: true },
+  { key: 'repo', label: 'Repositório', icon: 'bi-folder2', default: true },
+  { key: 'branch', label: 'Branch', icon: 'bi-diagram-2', default: true },
+  { key: 'message', label: 'Mensagem do Commit', icon: 'bi-chat-left-text', default: true },
+  { key: 'files', label: 'Arquivos / Ajustes', icon: 'bi-file-earmark-code', default: true },
+  { key: 'status', label: 'Status IC', icon: 'bi-check-circle', default: true },
+  { key: 'actions', label: 'Criar IC (Ação)', icon: 'bi-card-checklist', default: true },
+];
+
+const COLUMNS_STORAGE_KEY = 'gerador_ic_commits_table_columns_v1';
+
+function getVisibleColumnsMap() {
+  try {
+    const saved = localStorage.getItem(COLUMNS_STORAGE_KEY);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (typeof parsed === 'object' && parsed !== null) {
+        return parsed;
+      }
+    }
+  } catch (e) {
+    console.warn('Erro ao ler colunas salvas:', e);
+  }
+  const defMap = {};
+  COMMITS_COLUMNS_DEF.forEach(c => { defMap[c.key] = c.default; });
+  return defMap;
+}
+
+function saveVisibleColumnsMap(colMap) {
+  try {
+    localStorage.setItem(COLUMNS_STORAGE_KEY, JSON.stringify(colMap));
+  } catch (e) {
+    console.warn('Erro ao salvar colunas:', e);
+  }
+}
+
+function applyTableColumnVisibility() {
+  const colMap = getVisibleColumnsMap();
+  COMMITS_COLUMNS_DEF.forEach(c => {
+    const isVisible = colMap[c.key] !== false;
+    const cells = document.querySelectorAll(`table.table-custom th[data-col="${c.key}"], table.table-custom td[data-col="${c.key}"]`);
+    cells.forEach(el => {
+      if (isVisible) {
+        el.classList.remove('col-hidden', 'd-none');
+      } else {
+        el.classList.add('col-hidden');
+      }
+    });
+
+    const chks = document.querySelectorAll(`.column-toggle-check[data-col="${c.key}"]`);
+    chks.forEach(chk => {
+      chk.checked = isVisible;
+    });
+  });
+
+  const total = COMMITS_COLUMNS_DEF.length;
+  const activeCount = COMMITS_COLUMNS_DEF.filter(c => colMap[c.key] !== false).length;
+  document.querySelectorAll(".col-count-badge").forEach(b => {
+    b.textContent = `${activeCount}/${total}`;
+  });
+}
+
+function toggleTableColumn(colKey, isChecked) {
+  const colMap = getVisibleColumnsMap();
+  colMap[colKey] = isChecked;
+  saveVisibleColumnsMap(colMap);
+  applyTableColumnVisibility();
+}
+
+function toggleAllTableColumns(visible) {
+  const colMap = {};
+  COMMITS_COLUMNS_DEF.forEach(c => {
+    colMap[c.key] = visible;
+  });
+  saveVisibleColumnsMap(colMap);
+  applyTableColumnVisibility();
+}
+
+function resetTableColumns() {
+  try {
+    localStorage.removeItem(COLUMNS_STORAGE_KEY);
+  } catch (e) {}
+  applyTableColumnVisibility();
+}
+
+function setupColumnSelectors() {
+  const containers = document.querySelectorAll(".column-selector-list");
+  if (!containers.length) return;
+
+  const colMap = getVisibleColumnsMap();
+
+  containers.forEach(container => {
+    let html = "";
+    COMMITS_COLUMNS_DEF.forEach(c => {
+      const isChecked = colMap[c.key] !== false;
+      const inputId = `col-toggle-${c.key}-${Math.random().toString(36).substring(2, 7)}`;
+      html += `
+        <div class="column-toggle-item d-flex align-items-center justify-content-between">
+          <div class="form-check form-check-custom mb-0 d-flex align-items-center gap-2 w-100">
+            <input class="form-check-input column-toggle-check" type="checkbox" id="${inputId}" data-col="${c.key}" ${isChecked ? "checked" : ""} onchange="toggleTableColumn('${c.key}', this.checked)">
+            <label class="form-check-label text-light small user-select-none d-flex align-items-center gap-1 w-100" for="${inputId}">
+              <i class="bi ${c.icon} text-primary me-1" style="font-size: 0.85rem;"></i>
+              <span>${c.label}</span>
+            </label>
+          </div>
+        </div>
+      `;
+    });
+    container.innerHTML = html;
+  });
+
+  applyTableColumnVisibility();
+}
+
+/**
  * Open Create Catalog Item (IC) Modal by commit hash
  */
-async function openCreateICByHash(commitHash) {
+async function openCreateICByHash(commitHash, defaultNature = null) {
   if (!commitHash) return;
   if (!window.COMMITS_STORE || Object.keys(window.COMMITS_STORE).length === 0) {
     initCommitsStore();
@@ -52,13 +173,14 @@ async function openCreateICByHash(commitHash) {
   }
 
   const hasXml = commit && (commit.has_xml_changes || commit.xml_files_count > 0 || (Array.isArray(commit.files_changed) && commit.files_changed.some(f => (typeof f === 'object' ? f.is_xml : String(f).toLowerCase().endsWith('.xml')))));
-  const needsInspect = !commit || (hasXml && !commit.xml_analyzed);
+  const hasSql = commit && (commit.has_sql_changes || commit.sql_files_count > 0 || (Array.isArray(commit.files_changed) && commit.files_changed.some(f => (typeof f === 'object' ? f.is_sql : String(f).toLowerCase().endsWith('.sql')))));
+  const needsInspect = !commit || ((hasXml || hasSql) && !commit.xml_analyzed);
 
   if (needsInspect) {
     const overlay = document.getElementById("loading-overlay");
     const overlaySub = document.getElementById("loading-overlay-subtitle");
     if (overlay) {
-      if (overlaySub) overlaySub.textContent = "Calculando tags XML do commit em tempo real...";
+      if (overlaySub) overlaySub.textContent = "Analisando scripts SQL e tags XML do commit em tempo real...";
       overlay.classList.add("active");
     }
 
@@ -80,7 +202,7 @@ async function openCreateICByHash(commitHash) {
   }
 
   if (commit) {
-    openCreateICModal(commit);
+    openCreateICModal(commit, defaultNature);
   } else {
     alert(`Commit '${commitHash}' não encontrado no repositório.`);
   }
@@ -457,113 +579,78 @@ let currentModalCommit = null;
 /**
  * Open Create Catalog Item (IC) Modal for a specific commit
  */
-function openCreateICModal(commitData) {
-  let commit = commitData;
-  if (typeof commit === "string") {
-    if (window.COMMITS_STORE && window.COMMITS_STORE[commit]) {
-      commit = window.COMMITS_STORE[commit];
-    } else {
-      try {
-        commit = JSON.parse(commitData);
-      } catch (e) {
-        console.error("Erro ao converter dados do commit:", e);
-        return;
-      }
-    }
-  }
+window.currentICNature = 'fluxo'; // 'fluxo' | 'sql'
 
-  currentModalCommit = commit;
-
-  const modalEl = document.getElementById("createICModal");
-  if (!modalEl) return;
-
-  const badgeEl = document.getElementById("icCommitBadge");
-  const titleEl = document.getElementById("icInputTitle");
+/**
+ * Switch the active nature in the Create IC modal ('fluxo' vs 'sql')
+ */
+function switchICNature(natureza) {
+  if (!currentModalCommit) return;
   const descEl = document.getElementById("icInputDesc");
-  const alertEl = document.getElementById("icFeedbackAlert");
-  const alertText = document.getElementById("icFeedbackText");
-
-  // Reset feedback alert
-  if (alertEl) {
-    alertEl.classList.add("d-none");
-    alertEl.classList.remove("alert-danger");
-    alertEl.classList.add("alert-success");
-  }
-  if (alertText) {
-    alertText.textContent = "";
-  }
-
-  // Reset simulation button
-  const simBtn = document.getElementById("btnSimulateICInRedmine");
-  if (simBtn) {
-    simBtn.disabled = false;
-    simBtn.className = "btn btn-outline-warning d-flex align-items-center gap-1";
-    simBtn.innerHTML = '<i class="bi bi-shield-check"></i> Testar no Redmine (Simulação)';
-  }
-
-  // Reset Redmine button & logs
-  const redmineBtn = document.getElementById("btnCreateICInRedmine");
-  if (redmineBtn) {
-    if (commit.redmine_id) {
-      redmineBtn.className = "btn btn-success d-flex align-items-center gap-1";
-      redmineBtn.innerHTML = `<i class="bi bi-box-arrow-up-right"></i> Redmine #${commit.redmine_id}`;
-      redmineBtn.disabled = false;
-      redmineBtn.onclick = () => window.open(`https://redmine.tjce.jus.br/issues/${commit.redmine_id}`, '_blank');
+  if (descEl) {
+    if (window.currentICNature === 'sql') {
+      currentModalCommit._edited_desc_sql = descEl.value;
     } else {
-      redmineBtn.className = "btn btn-warning text-dark fw-bold d-flex align-items-center gap-1";
-      redmineBtn.innerHTML = '<i class="bi bi-cloud-arrow-up-fill"></i> Criar no Redmine';
-      redmineBtn.disabled = false;
-      redmineBtn.onclick = function() { createICDirectlyInRedmine(this); };
+      currentModalCommit._edited_desc_fluxo = descEl.value;
+    }
+  }
+  window.currentICNature = (natureza === 'sql') ? 'sql' : 'fluxo';
+  renderModalForCurrentNature();
+}
+
+/**
+ * Update the tab badges and status tags inside the modal
+ */
+function updateNatureTabBadges(commit) {
+  const badgeFluxoCount = document.getElementById("badgeNatureFluxoCount");
+  const badgeFluxoStatus = document.getElementById("badgeNatureFluxoStatus");
+  const badgeSqlCount = document.getElementById("badgeNatureSqlCount");
+  const badgeSqlStatus = document.getElementById("badgeNatureSqlStatus");
+
+  const hasXml = commit.has_xml_changes || commit.xml_files_count > 0;
+  const hasSql = commit.has_sql_changes || commit.sql_files_count > 0;
+
+  const countXml = (commit.ic_count_xml && commit.ic_count_xml > 0) ? commit.ic_count_xml : (hasXml ? (commit.ic_count || commit.xml_files_count || 1) : 0);
+  const countSql = (commit.ic_count_sql && commit.ic_count_sql > 0) ? commit.ic_count_sql : (hasSql ? (commit.sql_files_count || 1) : 0);
+
+  if (badgeFluxoCount) badgeFluxoCount.textContent = `${countXml} ICs`;
+  if (badgeSqlCount) badgeSqlCount.textContent = `${countSql} ICs`;
+
+  if (badgeFluxoStatus) {
+    if (commit.redmine_id_fluxo) {
+      badgeFluxoStatus.className = "badge bg-warning text-dark fw-bold ms-1";
+      badgeFluxoStatus.style.backgroundColor = "";
+      badgeFluxoStatus.textContent = `#${commit.redmine_id_fluxo}`;
+    } else if (commit.is_saved_fluxo) {
+      badgeFluxoStatus.className = "badge bg-warning-subtle text-warning-emphasis border border-warning-subtle ms-1";
+      badgeFluxoStatus.style.backgroundColor = "";
+      badgeFluxoStatus.textContent = "Salvo";
+    } else {
+      badgeFluxoStatus.className = "badge bg-secondary ms-1 d-none";
+      badgeFluxoStatus.style.backgroundColor = "";
     }
   }
 
-  const redmineLogsCont = document.getElementById("icRedmineLogsContainer");
-  const redmineLogsList = document.getElementById("icRedmineLogsList");
-  const redmineLogsStatus = document.getElementById("icRedmineLogsStatus");
-  if (redmineLogsCont) redmineLogsCont.classList.add("d-none");
-  if (redmineLogsList) redmineLogsList.innerHTML = "";
-  if (redmineLogsStatus) {
-    redmineLogsStatus.className = "badge bg-secondary";
-    redmineLogsStatus.textContent = "Aguardando";
-  }
-
-  // Populate Redmine ID field and link if available
-  const redmineIdEl = document.getElementById("icInputRedmineId");
-  const redmineLinkEl = document.getElementById("icLinkRedmine");
-  const curRedmineId = commit.redmine_id ? String(commit.redmine_id).replace(/^#/, "").trim() : "";
-  if (redmineIdEl) {
-    redmineIdEl.value = curRedmineId;
-    redmineIdEl.oninput = onICInputChanged;
-  }
-  if (redmineLinkEl) {
-    if (curRedmineId) {
-      redmineLinkEl.href = `https://redmine.tjce.jus.br/issues/${curRedmineId}`;
-      redmineLinkEl.classList.remove("d-none");
+  if (badgeSqlStatus) {
+    if (commit.redmine_id_sql) {
+      badgeSqlStatus.className = "badge text-dark fw-bold ms-1";
+      badgeSqlStatus.style.backgroundColor = "#22d3ee";
+      badgeSqlStatus.textContent = `#${commit.redmine_id_sql}`;
+    } else if (commit.is_saved_sql) {
+      badgeSqlStatus.className = "badge text-info border border-info-subtle ms-1";
+      badgeSqlStatus.style.backgroundColor = "rgba(34, 211, 238, 0.15)";
+      badgeSqlStatus.textContent = "Salvo";
     } else {
-      redmineLinkEl.classList.add("d-none");
+      badgeSqlStatus.className = "badge bg-secondary ms-1 d-none";
+      badgeSqlStatus.style.backgroundColor = "";
     }
   }
+}
 
-  // Populate badge & branch
-  const shortHash = commit.short_hash || (commit.hash ? commit.hash.substring(0, 7) : "");
-  if (badgeEl) {
-    badgeEl.textContent = `Commit ${shortHash}`;
-  }
-  const branchBadgeEl = document.getElementById("icBranchBadge");
-  if (branchBadgeEl) {
-    if (commit.branch) {
-      branchBadgeEl.innerHTML = `<i class="bi bi-diagram-2 me-1"></i>${escapeHtml(commit.branch)}`;
-      branchBadgeEl.classList.remove("d-none");
-    } else {
-      branchBadgeEl.classList.add("d-none");
-    }
-  }
-
-  // Populate IC tags breakdown alert (icf.sh rule)
-  const tagsAlert = document.getElementById("icTagsAlert");
-  const countText = document.getElementById("icCountText");
-  const tagsDetail = document.getElementById("icTagsDetail");
-
+/**
+ * Render XML tags breakdown for Fluxo nature
+ */
+function renderXmlTagsDetail(commit, tagsAlert, countText, tagsDetail) {
   const rawMetrics = commit.xml_tags_metrics || {};
   let addedTags = {};
   let removedTags = {};
@@ -585,139 +672,369 @@ function openCreateICModal(commitData) {
     totalAdded = Object.values(addedTags).reduce((a, b) => a + b, 0);
   }
 
-  const effectiveTotalICs = commit.ic_count || (totalAdded + totalRemoved + totalModified);
+  const effectiveTotalICs = commit.ic_count_xml !== undefined ? commit.ic_count_xml : (commit.ic_count || (totalAdded + totalRemoved + totalModified));
 
-  if (tagsAlert && countText && tagsDetail) {
-    if (effectiveTotalICs > 0) {
-      tagsAlert.classList.remove("d-none");
-      let countLabel = `${effectiveTotalICs} Item(ns) de Catálogo (IC) calculados`;
-      const parts = [];
-      if (totalAdded > 0) parts.push(`+${totalAdded} adições`);
-      if (totalRemoved > 0) parts.push(`-${totalRemoved} remoções`);
-      if (totalModified > 0) parts.push(`~${totalModified} ajustes`);
-      if (parts.length > 0) {
-        countLabel += ` (${parts.join(", ")})`;
-      }
-      countText.textContent = countLabel;
+  if (effectiveTotalICs > 0) {
+    tagsAlert.classList.remove("d-none");
+    let countLabel = `${effectiveTotalICs} Item(ns) de Catálogo (Fluxo XML) calculados`;
+    const parts = [];
+    if (totalAdded > 0) parts.push(`+${totalAdded} adições`);
+    if (totalRemoved > 0) parts.push(`-${totalRemoved} remoções`);
+    if (totalModified > 0) parts.push(`~${totalModified} ajustes`);
+    if (parts.length > 0) {
+      countLabel += ` (${parts.join(", ")})`;
+    }
+    countText.textContent = countLabel;
 
-      // Combine XML files from commit.files_changed and flows so no edited XML is omitted
-      const flowEntriesMap = new Map();
+    const flowEntriesMap = new Map();
+    if (commit.files_changed && Array.isArray(commit.files_changed)) {
+      commit.files_changed.forEach(f => {
+        const isObj = typeof f === "object";
+        const rawPath = isObj ? (f.path || f.filename) : String(f);
+        const path = decodeGitPath(rawPath);
+        const isXml = isObj ? f.is_xml : path.toLowerCase().endsWith(".xml");
+        if (isXml) {
+          const flowData = findFlowMetricsForFile(path, flows);
+          flowEntriesMap.set(path.replace(/\\/g, "/").toLowerCase(), {
+            path: path,
+            flowData: flowData
+          });
+        }
+      });
+    }
 
-      if (commit.files_changed && Array.isArray(commit.files_changed)) {
-        commit.files_changed.forEach(f => {
-          const isObj = typeof f === "object";
-          const rawPath = isObj ? (f.path || f.filename) : String(f);
-          const path = decodeGitPath(rawPath);
-          const isXml = isObj ? f.is_xml : path.toLowerCase().endsWith(".xml");
-          if (isXml) {
-            const flowData = findFlowMetricsForFile(path, flows);
-            flowEntriesMap.set(path.replace(/\\/g, "/").toLowerCase(), {
-              path: path,
-              flowData: flowData
-            });
+    if (flows && typeof flows === "object") {
+      Object.entries(flows).forEach(([flowPath, flowData]) => {
+        const key = flowPath.replace(/\\/g, "/").toLowerCase();
+        const base = key.split("/").pop();
+        let matchedKey = null;
+        for (const existingKey of flowEntriesMap.keys()) {
+          if (existingKey === key || existingKey.split("/").pop() === base) {
+            matchedKey = existingKey;
+            break;
           }
-        });
-      }
+        }
+        if (matchedKey) {
+          const item = flowEntriesMap.get(matchedKey);
+          if (!item.flowData) item.flowData = flowData;
+        } else {
+          flowEntriesMap.set(key, {
+            path: flowPath,
+            flowData: flowData
+          });
+        }
+      });
+    }
 
-      if (flows && typeof flows === "object") {
-        Object.entries(flows).forEach(([flowPath, flowData]) => {
-          const key = flowPath.replace(/\\/g, "/").toLowerCase();
-          const base = key.split("/").pop();
-          let matchedKey = null;
-          for (const existingKey of flowEntriesMap.keys()) {
-            if (existingKey === key || existingKey.split("/").pop() === base) {
-              matchedKey = existingKey;
-              break;
-            }
-          }
-          if (matchedKey) {
-            const item = flowEntriesMap.get(matchedKey);
-            if (!item.flowData) item.flowData = flowData;
-          } else {
-            flowEntriesMap.set(key, {
-              path: flowPath,
-              flowData: flowData
-            });
-          }
-        });
-      }
+    let htmlBadges = "";
+    if (flowEntriesMap.size > 0) {
+      flowEntriesMap.forEach(({ path: flowPath, flowData }) => {
+        const fAdded = (flowData && flowData.added) || {};
+        const fRemoved = (flowData && flowData.removed) || {};
+        const fModified = (flowData && flowData.modified) || {};
+        const fTotalAdded = (flowData && flowData.total_added) || Object.values(fAdded).reduce((a, b) => a + b, 0);
+        const fTotalRemoved = (flowData && flowData.total_removed) || Object.values(fRemoved).reduce((a, b) => a + b, 0);
+        const fTotalModified = (flowData && flowData.total_modified) || Object.values(fModified).reduce((a, b) => a + b, 0);
+        const fTotal = (flowData && flowData.total_ics !== undefined) ? flowData.total_ics : (fTotalAdded + fTotalRemoved + fTotalModified);
 
-      let htmlBadges = "";
-      if (flowEntriesMap.size > 0) {
-        flowEntriesMap.forEach(({ path: flowPath, flowData }) => {
-          const fAdded = (flowData && flowData.added) || {};
-          const fRemoved = (flowData && flowData.removed) || {};
-          const fModified = (flowData && flowData.modified) || {};
-          const fTotalAdded = (flowData && flowData.total_added) || Object.values(fAdded).reduce((a, b) => a + b, 0);
-          const fTotalRemoved = (flowData && flowData.total_removed) || Object.values(fRemoved).reduce((a, b) => a + b, 0);
-          const fTotalModified = (flowData && flowData.total_modified) || Object.values(fModified).reduce((a, b) => a + b, 0);
-          const fTotal = (flowData && flowData.total_ics !== undefined) ? flowData.total_ics : (fTotalAdded + fTotalRemoved + fTotalModified);
+        htmlBadges += `<div class="p-2 mb-2 rounded bg-dark bg-opacity-50 border border-secondary border-opacity-25 w-100">`;
+        const badgeClass = fTotal > 0 ? "bg-warning text-dark" : "bg-secondary text-light";
+        const badgeText = fTotal > 0 ? `${fTotal} ICs` : "0 ICs (Sem tags de catálogo)";
+        htmlBadges += `<div class="fw-semibold text-warning small mb-1 d-flex align-items-center justify-content-between"><span><i class="bi bi-file-earmark-code me-1"></i>Fluxo: <span class="text-light">${escapeHtml(flowPath)}</span></span><span class="badge ${badgeClass} fw-bold">${badgeText}</span></div>`;
 
-          htmlBadges += `<div class="p-2 mb-2 rounded bg-dark bg-opacity-50 border border-secondary border-opacity-25 w-100">`;
-          const badgeClass = fTotal > 0 ? "bg-warning text-dark" : "bg-secondary text-light";
-          const badgeText = fTotal > 0 ? `${fTotal} ICs` : "0 ICs (Sem tags de catálogo)";
-          htmlBadges += `<div class="fw-semibold text-warning small mb-1 d-flex align-items-center justify-content-between"><span><i class="bi bi-file-earmark-code me-1"></i>Fluxo: <span class="text-light">${escapeHtml(flowPath)}</span></span><span class="badge ${badgeClass} fw-bold">${badgeText}</span></div>`;
-
-          const fAddEntries = Object.entries(fAdded).sort((a, b) => b[1] - a[1]);
-          const fRemEntries = Object.entries(fRemoved).sort((a, b) => b[1] - a[1]);
-          const fModEntries = Object.entries(fModified).sort((a, b) => b[1] - a[1]);
-
-          const tagBadges = [];
-          if (fAddEntries.length > 0) {
-            fAddEntries.forEach(([t, c]) => {
-              tagBadges.push(`<span class="badge bg-success bg-opacity-25 text-success border border-success-subtle fw-semibold px-2 py-1" title="Adicionada"><i class="bi bi-plus-lg me-1"></i>&lt;${escapeHtml(t)}&gt;: ${c}</span>`);
-            });
-          }
-          if (fRemEntries.length > 0) {
-            fRemEntries.forEach(([t, c]) => {
-              tagBadges.push(`<span class="badge bg-danger bg-opacity-25 text-danger border border-danger-subtle fw-semibold px-2 py-1" title="Removida"><i class="bi bi-dash-lg me-1"></i>&lt;${escapeHtml(t)}&gt;: ${c}</span>`);
-            });
-          }
-          if (fModEntries.length > 0) {
-            fModEntries.forEach(([t, c]) => {
-              tagBadges.push(`<span class="badge bg-warning bg-opacity-25 text-warning border border-warning-subtle fw-semibold px-2 py-1" title="Ajustada / Modificada"><i class="bi bi-pencil-fill me-1" style="font-size:0.65rem;"></i>&lt;${escapeHtml(t)}&gt;: ${c}</span>`);
-            });
-          }
-
-          if (tagBadges.length > 0) {
-            htmlBadges += `<div class="d-flex align-items-center gap-1 flex-wrap">${tagBadges.join(" ")}</div>`;
-          } else if (fTotal === 0) {
-            htmlBadges += `<div class="text-muted small ps-1">Arquivo XML editado sem alteração direta em nós/transições/regras de catálogo.</div>`;
-          }
-          htmlBadges += `</div>`;
-        });
-      } else {
-        const addEntries = Object.entries(addedTags).sort((a, b) => b[1] - a[1]);
-        const remEntries = Object.entries(removedTags).sort((a, b) => b[1] - a[1]);
-        const modEntries = Object.entries(modifiedTags).sort((a, b) => b[1] - a[1]);
+        const fAddEntries = Object.entries(fAdded).sort((a, b) => b[1] - a[1]);
+        const fRemEntries = Object.entries(fRemoved).sort((a, b) => b[1] - a[1]);
+        const fModEntries = Object.entries(fModified).sort((a, b) => b[1] - a[1]);
 
         const tagBadges = [];
-        if (addEntries.length > 0) {
-          addEntries.forEach(([t, c]) => {
+        if (fAddEntries.length > 0) {
+          fAddEntries.forEach(([t, c]) => {
             tagBadges.push(`<span class="badge bg-success bg-opacity-25 text-success border border-success-subtle fw-semibold px-2 py-1" title="Adicionada"><i class="bi bi-plus-lg me-1"></i>&lt;${escapeHtml(t)}&gt;: ${c}</span>`);
           });
         }
-        if (remEntries.length > 0) {
-          remEntries.forEach(([t, c]) => {
+        if (fRemEntries.length > 0) {
+          fRemEntries.forEach(([t, c]) => {
             tagBadges.push(`<span class="badge bg-danger bg-opacity-25 text-danger border border-danger-subtle fw-semibold px-2 py-1" title="Removida"><i class="bi bi-dash-lg me-1"></i>&lt;${escapeHtml(t)}&gt;: ${c}</span>`);
           });
         }
-        if (modEntries.length > 0) {
-          modEntries.forEach(([t, c]) => {
+        if (fModEntries.length > 0) {
+          fModEntries.forEach(([t, c]) => {
             tagBadges.push(`<span class="badge bg-warning bg-opacity-25 text-warning border border-warning-subtle fw-semibold px-2 py-1" title="Ajustada / Modificada"><i class="bi bi-pencil-fill me-1" style="font-size:0.65rem;"></i>&lt;${escapeHtml(t)}&gt;: ${c}</span>`);
           });
         }
 
         if (tagBadges.length > 0) {
-          htmlBadges = `<div class="d-flex align-items-center gap-1 flex-wrap">${tagBadges.join(" ")}</div>`;
+          htmlBadges += `<div class="d-flex align-items-center gap-1 flex-wrap">${tagBadges.join(" ")}</div>`;
+        } else if (fTotal === 0) {
+          htmlBadges += `<div class="text-muted small ps-1">Arquivo XML editado sem alteração direta em nós/transições/regras de catálogo.</div>`;
         }
+        htmlBadges += `</div>`;
+      });
+    } else {
+      const addEntries = Object.entries(addedTags).sort((a, b) => b[1] - a[1]);
+      const remEntries = Object.entries(removedTags).sort((a, b) => b[1] - a[1]);
+      const modEntries = Object.entries(modifiedTags).sort((a, b) => b[1] - a[1]);
+
+      const tagBadges = [];
+      if (addEntries.length > 0) {
+        addEntries.forEach(([t, c]) => {
+          tagBadges.push(`<span class="badge bg-success bg-opacity-25 text-success border border-success-subtle fw-semibold px-2 py-1" title="Adicionada"><i class="bi bi-plus-lg me-1"></i>&lt;${escapeHtml(t)}&gt;: ${c}</span>`);
+        });
+      }
+      if (remEntries.length > 0) {
+        remEntries.forEach(([t, c]) => {
+          tagBadges.push(`<span class="badge bg-danger bg-opacity-25 text-danger border border-danger-subtle fw-semibold px-2 py-1" title="Removida"><i class="bi bi-dash-lg me-1"></i>&lt;${escapeHtml(t)}&gt;: ${c}</span>`);
+        });
+      }
+      if (modEntries.length > 0) {
+        modEntries.forEach(([t, c]) => {
+          tagBadges.push(`<span class="badge bg-warning bg-opacity-25 text-warning border border-warning-subtle fw-semibold px-2 py-1" title="Ajustada / Modificada"><i class="bi bi-pencil-fill me-1" style="font-size:0.65rem;"></i>&lt;${escapeHtml(t)}&gt;: ${c}</span>`);
+        });
       }
 
-      tagsDetail.innerHTML = htmlBadges || `<span class="text-muted small">Tags válidas calculadas.</span>`;
+      if (tagBadges.length > 0) {
+        htmlBadges = `<div class="d-flex align-items-center gap-1 flex-wrap">${tagBadges.join(" ")}</div>`;
+      }
+    }
+
+    tagsDetail.innerHTML = htmlBadges || `<span class="text-muted small">Tags válidas calculadas.</span>`;
+  } else {
+    tagsAlert.classList.add("d-none");
+    countText.textContent = "";
+    tagsDetail.innerHTML = "";
+  }
+}
+
+/**
+ * Render the modal contents dynamically according to window.currentICNature ('fluxo' vs 'sql')
+ */
+function renderModalForCurrentNature() {
+  const commit = currentModalCommit;
+  if (!commit) return;
+
+  const btnFluxo = document.getElementById("btnSelectIcFluxo");
+  const btnSql = document.getElementById("btnSelectIcSql");
+  const inputNatureza = document.getElementById("icInputNatureza");
+  const inputActivity = document.getElementById("icInputActivityType");
+  const displayActivity = document.getElementById("icDisplayActivityType");
+  const natureBadge = document.getElementById("icNatureBadge");
+  const descEl = document.getElementById("icInputDesc");
+  const quantityEl = document.getElementById("icInputQuantity");
+  const redmineBtn = document.getElementById("btnCreateICInRedmine");
+  const simBtn = document.getElementById("btnSimulateICInRedmine");
+  const redmineIdEl = document.getElementById("icInputRedmineId");
+  const tagsAlert = document.getElementById("icTagsAlert");
+  const countText = document.getElementById("icCountText");
+  const tagsDetail = document.getElementById("icTagsDetail");
+  const rulesBadge = document.getElementById("icRulesBadge");
+  const subtitleEl = document.getElementById("icBreakdownSubtitle");
+
+  const isSql = window.currentICNature === 'sql';
+
+  // Toggle button styling for active nature
+  if (btnFluxo && btnSql) {
+    if (isSql) {
+      btnFluxo.className = "btn btn-outline-warning flex-fill fw-bold d-flex align-items-center justify-content-center gap-2 py-2";
+      btnSql.className = "btn flex-fill fw-bold d-flex align-items-center justify-content-center gap-2 py-2 shadow-sm text-dark";
+      btnSql.style.backgroundColor = "#22d3ee";
     } else {
-      tagsAlert.classList.add("d-none");
-      countText.textContent = "";
-      tagsDetail.innerHTML = "";
+      btnFluxo.className = "btn btn-warning text-dark flex-fill fw-bold d-flex align-items-center justify-content-center gap-2 py-2 shadow-sm";
+      btnSql.className = "btn btn-outline-info flex-fill fw-bold d-flex align-items-center justify-content-center gap-2 py-2";
+      btnSql.style.backgroundColor = "";
+    }
+  }
+
+  // Activity strings per nature
+  const actFluxo = "Desenvolvimento - Criar/Manter tarefa de automação";
+  const actSql = "Desenvolvimento - Criar/Manter scripts para extração de dados do banco de dados";
+  if (inputNatureza) inputNatureza.value = isSql ? "sql" : "fluxo";
+  if (inputActivity) inputActivity.value = isSql ? actSql : actFluxo;
+  if (displayActivity) displayActivity.textContent = isSql ? actSql : actFluxo;
+
+  if (natureBadge) {
+    if (isSql) {
+      natureBadge.className = "badge text-dark fw-bold";
+      natureBadge.style.backgroundColor = "#22d3ee";
+      natureBadge.textContent = "BANCO DE DADOS (SQL)";
+    } else {
+      natureBadge.className = "badge bg-warning text-dark fw-bold";
+      natureBadge.style.backgroundColor = "";
+      natureBadge.textContent = "CATÁLOGO / FLUXO (XML)";
+    }
+  }
+
+  // Determine Redmine ID for this nature
+  let currentRedmineId = isSql ? commit.redmine_id_sql : commit.redmine_id_fluxo;
+  if (!currentRedmineId && !commit.tem_ambos_ajustes) {
+    currentRedmineId = commit.redmine_id;
+  }
+  if (redmineIdEl) redmineIdEl.value = currentRedmineId || "";
+
+  const hasXml = commit.has_xml_changes || commit.xml_files_count > 0;
+  const hasSql = commit.has_sql_changes || commit.sql_files_count > 0;
+  const hasBoth = commit.tem_ambos_ajustes || (hasXml && hasSql);
+  const bothCreated = hasBoth && commit.redmine_id_fluxo && commit.redmine_id_sql;
+  const singleCreated = !hasBoth && (commit.redmine_id || (isSql ? commit.redmine_id_sql : commit.redmine_id_fluxo));
+
+  // Redmine button state: always a single unified button
+  if (redmineBtn) {
+    if (bothCreated) {
+      redmineBtn.className = "btn btn-success d-flex align-items-center gap-1";
+      redmineBtn.style.backgroundColor = "";
+      redmineBtn.innerHTML = `<i class="bi bi-box-arrow-up-right"></i> Redmines #${commit.redmine_id_fluxo} e #${commit.redmine_id_sql}`;
+      redmineBtn.disabled = false;
+      redmineBtn.onclick = () => window.open(`https://redmine.tjce.jus.br/issues/${commit.redmine_id_fluxo}`, '_blank');
+    } else if (singleCreated) {
+      const singleId = commit.redmine_id || (isSql ? commit.redmine_id_sql : commit.redmine_id_fluxo);
+      redmineBtn.className = "btn btn-success d-flex align-items-center gap-1";
+      redmineBtn.style.backgroundColor = "";
+      redmineBtn.innerHTML = `<i class="bi bi-box-arrow-up-right"></i> Redmine #${singleId}`;
+      redmineBtn.disabled = false;
+      redmineBtn.onclick = () => window.open(`https://redmine.tjce.jus.br/issues/${singleId}`, '_blank');
+    } else {
+      redmineBtn.className = "btn btn-warning text-dark fw-bold d-flex align-items-center gap-1";
+      redmineBtn.style.backgroundColor = "";
+      redmineBtn.innerHTML = '<i class="bi bi-cloud-arrow-up-fill"></i> Criar no Redmine';
+      redmineBtn.disabled = false;
+      redmineBtn.onclick = function() { createICDirectlyInRedmine(this, false); };
+    }
+  }
+
+  // Simulation button label: always a single unified button
+  if (simBtn) {
+    simBtn.disabled = false;
+    simBtn.className = "btn btn-outline-warning d-flex align-items-center gap-1";
+    simBtn.innerHTML = '<i class="bi bi-shield-check"></i> Testar no Redmine (Simulação)';
+  }
+
+  // Quantity and Description for this nature
+  if (isSql) {
+    const sqlIcs = (commit.ic_count_sql && commit.ic_count_sql > 0) ? commit.ic_count_sql : (commit.has_sql_changes ? 1 : 1);
+    if (quantityEl) quantityEl.value = sqlIcs > 0 ? sqlIcs : 1;
+    if (descEl) descEl.value = commit._edited_desc_sql || commit.ic_description_sql || commit.ic_description || "";
+
+    if (tagsAlert && countText && tagsDetail && rulesBadge && subtitleEl) {
+      tagsAlert.classList.remove("d-none");
+      rulesBadge.textContent = "Scripts SQL (Banco de Dados)";
+      rulesBadge.className = "badge text-dark fw-bold";
+      rulesBadge.style.backgroundColor = "#22d3ee";
+      subtitleEl.textContent = "Casos de Uso e Operações DML/DDL identificados nos scripts .sql:";
+
+      const sqlMetrics = commit.sql_scripts_metrics || {};
+      const scripts = sqlMetrics.scripts || [];
+      const totalIcs = sqlMetrics.total_ics || sqlIcs;
+      countText.textContent = `${totalIcs} IC(s) de Banco de Dados calculados`;
+
+      let html = "";
+      if (scripts.length > 0) {
+        scripts.forEach((sc) => {
+          html += `<div class="p-2 mb-2 rounded bg-dark bg-opacity-50 border border-secondary border-opacity-25 w-100">`;
+          html += `<div class="fw-semibold text-info small mb-1 d-flex align-items-center justify-content-between"><span><i class="bi bi-filetype-sql me-1"></i>Script: <span class="text-light">${escapeHtml(sc.nome_arquivo || "")}</span></span><span class="badge text-dark fw-bold" style="background:#22d3ee;">${sc.total_ics || 1} ICs</span></div>`;
+          const casos = sc.casos_de_uso || [];
+          if (casos.length > 0) {
+            html += `<div class="mb-1 text-light small"><span class="text-muted small">Casos de Uso:</span></div>`;
+            html += `<div class="d-flex flex-wrap gap-1 mb-1">`;
+            casos.forEach(c => {
+              html += `<span class="badge bg-info bg-opacity-25 text-info border border-info-subtle fw-semibold px-2 py-1"><i class="bi bi-check2 me-1"></i>${escapeHtml(c)}</span>`;
+            });
+            html += `</div>`;
+          }
+          const ops = sc.operacoes || {};
+          const opBadges = [];
+          for (const [op, cnt] of Object.entries(ops)) {
+            if (cnt > 0) {
+              opBadges.push(`<span class="badge bg-secondary-subtle text-light border border-secondary-subtle small">${escapeHtml(op)}: ${cnt}</span>`);
+            }
+          }
+          if (opBadges.length > 0) {
+            html += `<div class="d-flex flex-wrap gap-1 mt-1">${opBadges.join(" ")}</div>`;
+          }
+          html += `</div>`;
+        });
+      } else {
+        html = `<div class="p-2 rounded bg-dark bg-opacity-50 border border-secondary border-opacity-25"><span class="badge text-dark fw-bold" style="background:#22d3ee;"><i class="bi bi-database me-1"></i>Ajuste em scripts SQL detectado</span></div>`;
+      }
+      tagsDetail.innerHTML = html;
+    }
+  } else {
+    // Fluxo XML
+    const xmlIcs = (commit.ic_count_xml && commit.ic_count_xml > 0) ? commit.ic_count_xml : ((commit.ic_count && commit.ic_count > 0) ? commit.ic_count : (commit.xml_files_count || 1));
+    if (quantityEl) quantityEl.value = xmlIcs > 0 ? xmlIcs : 1;
+    if (descEl) descEl.value = commit._edited_desc_fluxo || commit.ic_description_fluxo || commit.ic_description || "";
+
+    if (tagsAlert && countText && tagsDetail && rulesBadge && subtitleEl) {
+      rulesBadge.textContent = "Regras do Catálogo (PJE)";
+      rulesBadge.className = "badge bg-warning text-dark fw-bold";
+      rulesBadge.style.backgroundColor = "";
+      subtitleEl.textContent = "Detalhamento das tags XML calculadas (Adições / Remoções - excluindo estruturais):";
+
+      renderXmlTagsDetail(commit, tagsAlert, countText, tagsDetail);
+    }
+  }
+}
+
+/**
+ * Open Create IC Modal for a commit, optionally preselecting 'fluxo' or 'sql'
+ */
+function openCreateICModal(commitData, defaultNature = null) {
+  let commit = commitData;
+  if (typeof commit === "string") {
+    if (window.COMMITS_STORE && window.COMMITS_STORE[commit]) {
+      commit = window.COMMITS_STORE[commit];
+    } else {
+      try {
+        commit = JSON.parse(commitData);
+      } catch (e) {
+        console.error("Erro ao converter dados do commit:", e);
+        return;
+      }
+    }
+  }
+
+  currentModalCommit = commit;
+
+  const modalEl = document.getElementById("createICModal");
+  if (!modalEl) return;
+
+  const badgeEl = document.getElementById("icCommitBadge");
+  const titleEl = document.getElementById("icInputTitle");
+  const alertEl = document.getElementById("icFeedbackAlert");
+  const alertText = document.getElementById("icFeedbackText");
+  const dualAlert = document.getElementById("icDualNatureAlert");
+  const branchBadgeEl = document.getElementById("icBranchBadge");
+
+  // Reset feedback alert
+  if (alertEl) {
+    alertEl.classList.add("d-none");
+    alertEl.classList.remove("alert-danger");
+    alertEl.classList.add("alert-success");
+  }
+  if (alertText) {
+    alertText.textContent = "";
+  }
+
+  // Reset logs container
+  const redmineLogsCont = document.getElementById("icRedmineLogsContainer");
+  const redmineLogsList = document.getElementById("icRedmineLogsList");
+  const redmineLogsStatus = document.getElementById("icRedmineLogsStatus");
+  if (redmineLogsCont) redmineLogsCont.classList.add("d-none");
+  if (redmineLogsList) redmineLogsList.innerHTML = "";
+  if (redmineLogsStatus) {
+    redmineLogsStatus.className = "badge bg-secondary";
+    redmineLogsStatus.textContent = "Aguardando";
+  }
+
+  // Populate badge & branch
+  const shortHash = commit.short_hash || (commit.hash ? commit.hash.substring(0, 7) : "");
+  if (badgeEl) {
+    badgeEl.textContent = `Commit ${shortHash}`;
+  }
+  if (branchBadgeEl) {
+    if (commit.branch) {
+      branchBadgeEl.innerHTML = `<i class="bi bi-diagram-2 me-1"></i>${escapeHtml(commit.branch)}`;
+      branchBadgeEl.classList.remove("d-none");
+    } else {
+      branchBadgeEl.classList.add("d-none");
     }
   }
 
@@ -728,212 +1045,49 @@ function openCreateICModal(commitData) {
   }
   if (titleEl) {
     titleEl.value = icTitle || "Atividade de Desenvolvimento";
+    titleEl.oninput = onICInputChanged;
   }
 
-  // Populate description
-  let icDesc = commit.ic_description;
-  if (!icDesc) {
-    const dateStr = commit.commit_date || "";
-    const author = commit.author || "";
-    const url = commit.commit_url || "";
-    const lines = [
-      `Commit: ${shortHash}`,
-      `Data: ${dateStr}`,
-      `Autor: ${author}`
-    ];
-    if (url) lines.push(`Link: ${url}`);
-    lines.push("");
-    lines.push("Descrição:");
-    lines.push((commit.message || "").trim());
-
-    if (effectiveTotalICs > 0) {
-      lines.push("");
-      let countSummary = "";
-      const parts = [];
-      if (totalAdded > 0) parts.push(`+${totalAdded} adições`);
-      if (totalRemoved > 0) parts.push(`-${totalRemoved} remoções`);
-      if (totalModified > 0) parts.push(`~${totalModified} ajustes`);
-      if (parts.length > 0) {
-        countSummary = ` (${parts.join(", ")})`;
-      }
-      lines.push(`Itens de Catálogo (IC) calculados: ${effectiveTotalICs} IC(s)${countSummary}`);
-    }
-
-    if (commit.files_changed && commit.files_changed.length > 0) {
-      lines.push("");
-      lines.push("Arquivos Alterados:");
-      let xmlCount = 0;
-      const matchedFlows = new Set();
-
-      commit.files_changed.forEach(f => {
-        const isObj = typeof f === "object";
-        const rawPath = isObj ? (f.path || f.filename) : String(f);
-        const path = decodeGitPath(rawPath);
-        const isXml = isObj ? f.is_xml : path.toLowerCase().endsWith(".xml");
-        const ins = isObj ? (f.insertions || 0) : 0;
-        const del = isObj ? (f.deletions || 0) : 0;
-        const diff = (ins || del) ? ` (+${ins} / -${del})` : "";
-
-        if (isXml) {
-          xmlCount++;
-          lines.push(`* [XML] ${path}${diff}`);
-
-          const flowData = findFlowMetricsForFile(path, flows);
-          if (flowData) {
-            matchedFlows.add(flowData.path || path);
-            const fAdded = flowData.added || {};
-            const fRemoved = flowData.removed || {};
-            const fModified = flowData.modified || {};
-            const fTotalAdded = flowData.total_added || Object.values(fAdded).reduce((a, b) => a + b, 0);
-            const fTotalRemoved = flowData.total_removed || Object.values(fRemoved).reduce((a, b) => a + b, 0);
-            const fTotalModified = flowData.total_modified || Object.values(fModified).reduce((a, b) => a + b, 0);
-
-            if (Object.keys(fAdded).length > 0) {
-              lines.push(`** Tags Adicionadas (+${fTotalAdded}):`);
-              Object.entries(fAdded).sort((a, b) => b[1] - a[1]).forEach(([t, c]) => {
-                lines.push(`*** <${t}>: ${c}`);
-              });
-            }
-            if (Object.keys(fRemoved).length > 0) {
-              lines.push(`** Tags Removidas (-${fTotalRemoved}):`);
-              Object.entries(fRemoved).sort((a, b) => b[1] - a[1]).forEach(([t, c]) => {
-                lines.push(`*** <${t}>: ${c}`);
-              });
-            }
-            if (Object.keys(fModified).length > 0) {
-              lines.push(`** Tags Modificadas / Ajustadas (~${fTotalModified}):`);
-              Object.entries(fModified).sort((a, b) => b[1] - a[1]).forEach(([t, c]) => {
-                lines.push(`*** <${t}>: ${c}`);
-              });
-            }
-          }
-        } else {
-          lines.push(`* ${path}${diff}`);
-        }
-      });
-
-      // Fallback for flows not in files_changed
-      if (flows) {
-        Object.entries(flows).forEach(([fPath, fData]) => {
-          if ((fData.total_ics || 0) > 0 && !matchedFlows.has(fPath)) {
-            const flowCheck = findFlowMetricsForFile(fPath, Object.fromEntries([...matchedFlows].map(p => [p, {}])));
-            if (!flowCheck) {
-              xmlCount++;
-              lines.push(`* [XML] ${fPath}`);
-              const fAdded = fData.added || {};
-              const fRemoved = fData.removed || {};
-              const fModified = fData.modified || {};
-              const fTotalAdded = fData.total_added || Object.values(fAdded).reduce((a, b) => a + b, 0);
-              const fTotalRemoved = fData.total_removed || Object.values(fRemoved).reduce((a, b) => a + b, 0);
-              const fTotalModified = fData.total_modified || Object.values(fModified).reduce((a, b) => a + b, 0);
-              if (Object.keys(fAdded).length > 0) {
-                lines.push(`** Tags Adicionadas (+${fTotalAdded}):`);
-                Object.entries(fAdded).sort((a, b) => b[1] - a[1]).forEach(([t, c]) => {
-                  lines.push(`*** <${t}>: ${c}`);
-                });
-              }
-              if (Object.keys(fRemoved).length > 0) {
-                lines.push(`** Tags Removidas (-${fTotalRemoved}):`);
-                Object.entries(fRemoved).sort((a, b) => b[1] - a[1]).forEach(([t, c]) => {
-                  lines.push(`*** <${t}>: ${c}`);
-                });
-              }
-              if (Object.keys(fModified).length > 0) {
-                lines.push(`** Tags Modificadas / Ajustadas (~${fTotalModified}):`);
-                Object.entries(fModified).sort((a, b) => b[1] - a[1]).forEach(([t, c]) => {
-                  lines.push(`*** <${t}>: ${c}`);
-                });
-              }
-            }
-          }
-        });
-      }
-
-      if (xmlCount > 0) {
-        lines.push(`(Total de arquivos XML alterados: ${xmlCount})`);
-      }
-    } else if (flows && Object.keys(flows).length > 0) {
-      lines.push("");
-      lines.push("Arquivos Alterados:");
-      let xmlCount = 0;
-      Object.entries(flows).forEach(([fPath, fData]) => {
-        if ((fData.total_ics || 0) > 0) {
-          xmlCount++;
-          lines.push(`* [XML] ${fPath}`);
-          const fAdded = fData.added || {};
-          const fRemoved = fData.removed || {};
-          const fModified = fData.modified || {};
-          const fTotalAdded = fData.total_added || Object.values(fAdded).reduce((a, b) => a + b, 0);
-          const fTotalRemoved = fData.total_removed || Object.values(fRemoved).reduce((a, b) => a + b, 0);
-          const fTotalModified = fData.total_modified || Object.values(fModified).reduce((a, b) => a + b, 0);
-          if (Object.keys(fAdded).length > 0) {
-            lines.push(`** Tags Adicionadas (+${fTotalAdded}):`);
-            Object.entries(fAdded).sort((a, b) => b[1] - a[1]).forEach(([t, c]) => {
-              lines.push(`*** <${t}>: ${c}`);
-            });
-          }
-          if (Object.keys(fRemoved).length > 0) {
-            lines.push(`** Tags Removidas (-${fTotalRemoved}):`);
-            Object.entries(fRemoved).sort((a, b) => b[1] - a[1]).forEach(([t, c]) => {
-              lines.push(`*** <${t}>: ${c}`);
-            });
-          }
-          if (Object.keys(fModified).length > 0) {
-            lines.push(`** Tags Modificadas / Ajustadas (~${fTotalModified}):`);
-            Object.entries(fModified).sort((a, b) => b[1] - a[1]).forEach(([t, c]) => {
-              lines.push(`*** <${t}>: ${c}`);
-            });
-          }
-        }
-      });
-      if (xmlCount > 0) {
-        lines.push(`(Total de arquivos XML alterados: ${xmlCount})`);
-      }
-    } else if (effectiveTotalICs > 0 && (Object.keys(addedTags).length > 0 || Object.keys(removedTags).length > 0 || Object.keys(modifiedTags).length > 0)) {
-      lines.push("");
-      lines.push("Tags XML Alteradas:");
-      if (Object.keys(addedTags).length > 0) {
-        lines.push(`* Tags Adicionadas (+${totalAdded}):`);
-        Object.entries(addedTags).sort((a, b) => b[1] - a[1]).forEach(([t, c]) => {
-          lines.push(`** <${t}>: ${c}`);
-        });
-      }
-      if (Object.keys(removedTags).length > 0) {
-        lines.push(`* Tags Removidas (-${totalRemoved}):`);
-        Object.entries(removedTags).sort((a, b) => b[1] - a[1]).forEach(([t, c]) => {
-          lines.push(`** <${t}>: ${c}`);
-        });
-      }
-      if (Object.keys(modifiedTags).length > 0) {
-        lines.push(`* Tags Modificadas / Ajustadas (~${totalModified}):`);
-        Object.entries(modifiedTags).sort((a, b) => b[1] - a[1]).forEach(([t, c]) => {
-          lines.push(`** <${t}>: ${c}`);
-        });
-      }
-    }
-    icDesc = lines.join("\n");
-  }
-
-  if (descEl) {
-    descEl.value = icDesc;
-  }
-
-  // Populate Complexity and Quantity fields
+  // Populate Complexity
   const complexityEl = document.getElementById("icInputComplexity");
   if (complexityEl) {
     complexityEl.value = commit.complexity || "Baixa";
   }
-  const quantityEl = document.getElementById("icInputQuantity");
-  if (quantityEl) {
-    quantityEl.value = effectiveTotalICs > 0 ? effectiveTotalICs : 1;
+
+  // Check Dual Nature (XML and SQL simultaneously)
+  const hasXml = commit.has_xml_changes || commit.xml_files_count > 0;
+  const hasSql = commit.has_sql_changes || commit.sql_files_count > 0;
+  const hasBoth = commit.tem_ambos_ajustes || (hasXml && hasSql);
+
+  if (dualAlert) {
+    if (hasBoth) {
+      dualAlert.classList.remove("d-none");
+    } else {
+      dualAlert.classList.add("d-none");
+    }
   }
 
-  if (titleEl) {
-    titleEl.oninput = onICInputChanged;
+  const natureSelectorCont = document.getElementById("icNatureSelectorContainer");
+  if (natureSelectorCont) {
+    if (hasBoth) {
+      natureSelectorCont.classList.remove("d-none");
+    } else {
+      natureSelectorCont.classList.add("d-none");
+    }
   }
-  if (descEl) {
-    descEl.oninput = onICInputChanged;
+
+  // Choose starting nature
+  if (defaultNature) {
+    window.currentICNature = defaultNature;
+  } else if (hasSql && !hasXml) {
+    window.currentICNature = 'sql';
+  } else {
+    window.currentICNature = 'fluxo';
   }
+
+  // Update tabs badges & render modal for starting nature
+  updateNatureTabBadges(commit);
+  renderModalForCurrentNature();
 
   const modal = new bootstrap.Modal(modalEl);
   modal.show();
@@ -970,7 +1124,19 @@ async function copyFullICToRedmine(btn) {
   const title = titleEl ? titleEl.value.trim() : "";
   const desc = descEl ? descEl.value.trim() : "";
 
-  const fullText = `TÍTULO:\n${title}\n\nDESCRIÇÃO:\n${desc}`;
+  const commit = currentModalCommit;
+  const hasXml = commit ? (commit.has_xml_changes || commit.xml_files_count > 0) : false;
+  const hasSql = commit ? (commit.has_sql_changes || commit.sql_files_count > 0) : false;
+  const hasBoth = commit && (commit.tem_ambos_ajustes || (hasXml && hasSql));
+
+  let fullText = "";
+  if (hasBoth) {
+    const descFluxo = commit._edited_desc_fluxo || (window.currentICNature === 'fluxo' ? desc : commit.ic_description_fluxo) || desc;
+    const descSql = commit._edited_desc_sql || (window.currentICNature === 'sql' ? desc : commit.ic_description_sql) || desc;
+    fullText = `=== 1. TAREFA REDMINE: CATÁLOGO DA FUNCIONALIDADE (FLUXO XML) ===\nAtividade: Desenvolvimento - Criar/Manter tarefa de automação\nTítulo: ${title}\n\nDescrição:\n${descFluxo}\n\n=======================================================\n=== 2. TAREFA REDMINE: BANCO DE DADOS (SCRIPTS SQL) ===\nAtividade: Desenvolvimento - Criar/Manter scripts para extração de dados do banco de dados\nTítulo: ${title}\n\nDescrição:\n${descSql}`;
+  } else {
+    fullText = `TÍTULO:\n${title}\n\nDESCRIÇÃO:\n${desc}`;
+  }
 
   try {
     await navigator.clipboard.writeText(fullText);
@@ -984,7 +1150,9 @@ async function copyFullICToRedmine(btn) {
     if (alertEl && alertText) {
       alertEl.classList.remove("d-none", "alert-danger");
       alertEl.classList.add("alert-success");
-      alertText.textContent = "Título e descrição copiados com sucesso! Cole diretamente no Redmine.";
+      alertText.textContent = hasBoth 
+        ? "Títulos e descrições dos 2 Redmines copiados com sucesso!" 
+        : "Título e descrição copiados com sucesso! Cole diretamente no Redmine.";
     }
   } catch (err) {
     console.error("Erro ao copiar IC completo:", err);
@@ -994,10 +1162,13 @@ async function copyFullICToRedmine(btn) {
 /**
  * Update the status badge in the commits table
  */
-function updateCommitStatusCell(hash, isSaved) {
-  if (!hash) return;
-  const cleanHash = hash.trim().toLowerCase();
-  let cell = document.getElementById(`status-cell-${hash}`) || document.getElementById(`status-cell-${cleanHash}`);
+/**
+ * Update the status badge in the commits table (supports dual Redmines)
+ */
+function updateTableStatusCell(commit) {
+  if (!commit || !commit.hash) return;
+  const cleanHash = commit.hash.trim().toLowerCase();
+  let cell = document.getElementById(`status-cell-${commit.hash}`) || document.getElementById(`status-cell-${cleanHash}`);
   if (!cell && cleanHash.length >= 7) {
     cell = document.getElementById(`status-cell-${cleanHash.substring(0, 7)}`);
   }
@@ -1011,20 +1182,58 @@ function updateCommitStatusCell(hash, isSaved) {
       }
     }
   }
-  if (cell) {
-    if (isSaved) {
-      cell.innerHTML = `
-        <span class="badge bg-success-subtle text-success border border-success-subtle" title="Item de Catálogo já salvo no PostgreSQL">
-          <i class="bi bi-check-circle-fill me-1"></i>Salvo
-        </span>
-      `;
+  if (!cell) return;
+
+  const temAmbos = commit.tem_ambos_ajustes || (commit.has_xml_changes && commit.has_sql_changes);
+  if (temAmbos) {
+    let fluxoHtml = "";
+    if (commit.redmine_id_fluxo) {
+      fluxoHtml = `<a href="https://redmine.tjce.jus.br/issues/${commit.redmine_id_fluxo}" target="_blank" class="badge bg-warning text-dark fw-bold text-decoration-none d-inline-flex align-items-center gap-1" title="Redmine de Fluxo (.xml)"><i class="bi bi-diagram-3-fill"></i> #${commit.redmine_id_fluxo}</a>`;
+    } else if (commit.is_saved_fluxo) {
+      fluxoHtml = `<span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle d-inline-flex align-items-center gap-1" title="Fluxo salvo no banco de dados"><i class="bi bi-diagram-3"></i> Fluxo Salvo</span>`;
     } else {
-      cell.innerHTML = `
-        <span class="badge bg-secondary-subtle text-muted border border-secondary-subtle" title="Não salvo no banco de dados">
-          Não Salvo
-        </span>
-      `;
+      fluxoHtml = `<span class="badge bg-secondary-subtle text-muted border border-secondary-subtle d-inline-flex align-items-center gap-1" title="Fluxo pendente"><i class="bi bi-diagram-3"></i> Fluxo Pendente</span>`;
     }
+
+    let sqlHtml = "";
+    if (commit.redmine_id_sql) {
+      sqlHtml = `<a href="https://redmine.tjce.jus.br/issues/${commit.redmine_id_sql}" target="_blank" class="badge text-dark fw-bold text-decoration-none d-inline-flex align-items-center gap-1" style="background-color: #22d3ee;" title="Redmine de Scripts SQL (.sql)"><i class="bi bi-database-fill"></i> #${commit.redmine_id_sql}</a>`;
+    } else if (commit.is_saved_sql) {
+      sqlHtml = `<span class="badge text-info border border-info-subtle d-inline-flex align-items-center gap-1" style="background-color: rgba(34, 211, 238, 0.15);" title="SQL salvo no banco de dados"><i class="bi bi-database"></i> SQL Salvo</span>`;
+    } else {
+      sqlHtml = `<span class="badge bg-secondary-subtle text-muted border border-secondary-subtle d-inline-flex align-items-center gap-1" title="SQL pendente"><i class="bi bi-database"></i> SQL Pendente</span>`;
+    }
+
+    cell.innerHTML = `<div class="d-flex flex-column gap-1 align-items-center">${fluxoHtml}${sqlHtml}</div>`;
+  } else if (commit.redmine_id) {
+    if (commit.has_sql_changes) {
+      cell.innerHTML = `<a href="https://redmine.tjce.jus.br/issues/${commit.redmine_id}" target="_blank" class="badge text-dark fw-bold text-decoration-none d-inline-flex align-items-center gap-1" style="background-color: #22d3ee;" title="Redmine de Scripts SQL (.sql)"><i class="bi bi-database-fill"></i> #${commit.redmine_id}</a>`;
+    } else if (commit.has_xml_changes) {
+      cell.innerHTML = `<a href="https://redmine.tjce.jus.br/issues/${commit.redmine_id}" target="_blank" class="badge bg-warning text-dark fw-bold text-decoration-none d-inline-flex align-items-center gap-1" title="Redmine de Fluxo (.xml)"><i class="bi bi-diagram-3-fill"></i> #${commit.redmine_id}</a>`;
+    } else {
+      cell.innerHTML = `<a href="https://redmine.tjce.jus.br/issues/${commit.redmine_id}" target="_blank" class="badge bg-success text-decoration-none d-inline-flex align-items-center gap-1" title="Abrir tarefa no Redmine"><i class="bi bi-check-circle-fill"></i> #${commit.redmine_id}</a>`;
+    }
+  } else if (commit.is_saved) {
+    if (commit.has_sql_changes) {
+      cell.innerHTML = `<span class="badge text-info border border-info-subtle d-inline-flex align-items-center gap-1" style="background-color: rgba(34, 211, 238, 0.15);" title="Item salvo no PostgreSQL"><i class="bi bi-database me-1"></i>Salvo</span>`;
+    } else if (commit.has_xml_changes) {
+      cell.innerHTML = `<span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle d-inline-flex align-items-center gap-1" title="Item salvo no PostgreSQL"><i class="bi bi-diagram-3 me-1"></i>Salvo</span>`;
+    } else {
+      cell.innerHTML = `<span class="badge bg-success-subtle text-success border border-success-subtle" title="Item de Catálogo já salvo no PostgreSQL"><i class="bi bi-check-circle-fill me-1"></i>Salvo</span>`;
+    }
+  } else {
+    cell.innerHTML = `<span class="badge bg-secondary-subtle text-muted border border-secondary-subtle" title="Não salvo no banco de dados">Não Salvo</span>`;
+  }
+}
+
+function updateCommitStatusCell(hash, isSaved) {
+  if (!hash) return;
+  const commit = window.COMMITS_STORE ? window.COMMITS_STORE[hash] : null;
+  if (commit) {
+    commit.is_saved = isSaved;
+    updateTableStatusCell(commit);
+  } else {
+    updateTableStatusCell({ hash: hash, is_saved: isSaved });
   }
 }
 
@@ -1099,11 +1308,182 @@ async function createICDirectlyInRedmine(btn, isDryRun = false) {
 
   const commitHash = currentModalCommit ? (currentModalCommit.hash || currentModalCommit.short_hash || "") : "";
   const commitUrl = currentModalCommit ? (currentModalCommit.commit_url || currentModalCommit.web_commit_url || "") : "";
-
-  // Read complexity and quantity directly from modal inputs
   const complexityEl = document.getElementById("icInputComplexity");
-  const quantityEl = document.getElementById("icInputQuantity");
   const complexity = complexityEl ? complexityEl.value : (currentModalCommit && currentModalCommit.complexity ? currentModalCommit.complexity : "Baixa");
+
+  const hasXml = currentModalCommit ? (currentModalCommit.has_xml_changes || currentModalCommit.xml_files_count > 0) : false;
+  const hasSql = currentModalCommit ? (currentModalCommit.has_sql_changes || currentModalCommit.sql_files_count > 0) : false;
+  const hasBoth = currentModalCommit && (currentModalCommit.tem_ambos_ajustes || (hasXml && hasSql));
+
+  // CASO COMMIT MISTO (XML + SQL): Um único clique cria/simula AMBOS os Redmines automaticamente
+  if (hasBoth) {
+    try {
+      const needFluxo = !currentModalCommit.redmine_id_fluxo;
+      const needSql = !currentModalCommit.redmine_id_sql;
+
+      if (!needFluxo && !needSql) {
+        appendLog(`Ambas as tarefas já foram criadas: #${currentModalCommit.redmine_id_fluxo} (Fluxo) e #${currentModalCommit.redmine_id_sql} (SQL)`);
+        if (btn) {
+          btn.disabled = false;
+          btn.className = "btn btn-success d-flex align-items-center gap-1";
+          btn.innerHTML = `<i class="bi bi-box-arrow-up-right"></i> Redmines #${currentModalCommit.redmine_id_fluxo} e #${currentModalCommit.redmine_id_sql}`;
+          btn.onclick = () => window.open(`https://redmine.tjce.jus.br/issues/${currentModalCommit.redmine_id_fluxo}`, '_blank');
+        }
+        return;
+      }
+
+      let fluxoIssueId = currentModalCommit.redmine_id_fluxo || null;
+      let sqlIssueId = currentModalCommit.redmine_id_sql || null;
+
+      // 1. Processar Redmine Fluxo (XML)
+      if (needFluxo) {
+        appendLog("[1/2] Processando Redmine de Catálogo da Funcionalidade (Fluxo XML)...");
+        const descFluxo = currentModalCommit._edited_desc_fluxo || (window.currentICNature === 'fluxo' ? description : currentModalCommit.ic_description_fluxo) || description;
+        const countFluxo = currentModalCommit.ic_count_xml !== undefined ? currentModalCommit.ic_count_xml : (currentModalCommit.ic_count || 1);
+
+        const resFluxo = await fetch("/api/redmine/create-ic", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title: title,
+            description: descFluxo,
+            commit_hash: commitHash,
+            commit_url: commitUrl,
+            ic_count: countFluxo,
+            natureza: "fluxo",
+            activity_type: "Desenvolvimento - Criar/Manter tarefa de automação",
+            complexity: complexity,
+            dry_run: isDryRun,
+          }),
+        });
+        const dataFluxo = await resFluxo.json();
+        if (Array.isArray(dataFluxo.logs)) {
+          dataFluxo.logs.forEach(msg => appendLog(`[Fluxo] ${msg}`, msg.includes("FALHA") || msg.includes("Erro")));
+        }
+        if (!dataFluxo.success) {
+          throw new Error(dataFluxo.message || "Falha ao criar Redmine de Fluxo.");
+        }
+        fluxoIssueId = dataFluxo.issue_id;
+        currentModalCommit.redmine_id_fluxo = fluxoIssueId;
+        currentModalCommit.is_saved_fluxo = true;
+        appendLog(`[Fluxo XML] Tarefa #${fluxoIssueId} processada com sucesso!`);
+      } else {
+        appendLog(`[Fluxo XML] Já emitido anteriormente: #${fluxoIssueId}`);
+      }
+
+      // 2. Processar Redmine SQL (Scripts)
+      if (needSql) {
+        appendLog("[2/2] Processando Redmine de Banco de Dados (Scripts SQL)...");
+        const descSql = currentModalCommit._edited_desc_sql || (window.currentICNature === 'sql' ? description : currentModalCommit.ic_description_sql) || description;
+        const countSql = currentModalCommit.ic_count_sql !== undefined ? currentModalCommit.ic_count_sql : (currentModalCommit.has_sql_changes ? 1 : 1);
+
+        const resSql = await fetch("/api/redmine/create-ic", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title: title,
+            description: descSql,
+            commit_hash: commitHash,
+            commit_url: commitUrl,
+            ic_count: countSql,
+            natureza: "sql",
+            activity_type: "Desenvolvimento - Criar/Manter scripts para extração de dados do banco de dados",
+            complexity: complexity,
+            dry_run: isDryRun,
+          }),
+        });
+        const dataSql = await resSql.json();
+        if (Array.isArray(dataSql.logs)) {
+          dataSql.logs.forEach(msg => appendLog(`[SQL] ${msg}`, msg.includes("FALHA") || msg.includes("Erro")));
+        }
+        if (!dataSql.success) {
+          throw new Error(dataSql.message || "Falha ao criar Redmine de Banco de Dados.");
+        }
+        sqlIssueId = dataSql.issue_id;
+        currentModalCommit.redmine_id_sql = sqlIssueId;
+        currentModalCommit.is_saved_sql = true;
+        appendLog(`[Scripts SQL] Tarefa #${sqlIssueId} processada com sucesso!`);
+      } else {
+        appendLog(`[Scripts SQL] Já emitido anteriormente: #${sqlIssueId}`);
+      }
+
+      // Atualizar commit e storage
+      currentModalCommit.is_saved = true;
+      currentModalCommit.redmine_id = fluxoIssueId || sqlIssueId;
+
+      if (window.COMMITS_STORE && currentModalCommit.hash && window.COMMITS_STORE[currentModalCommit.hash]) {
+        const stored = window.COMMITS_STORE[currentModalCommit.hash];
+        stored.redmine_id_fluxo = fluxoIssueId;
+        stored.is_saved_fluxo = true;
+        stored.redmine_id_sql = sqlIssueId;
+        stored.is_saved_sql = true;
+        stored.is_saved = true;
+        stored.redmine_id = fluxoIssueId || sqlIssueId;
+      }
+
+      updateNatureTabBadges(currentModalCommit);
+      renderModalForCurrentNature();
+      updateTableStatusCell(currentModalCommit);
+
+      if (logsStatus) {
+        logsStatus.className = isDryRun ? "badge bg-info text-dark" : "badge bg-success";
+        logsStatus.textContent = isDryRun ? "Simulação Concluída (2 Tarefas)" : "Concluído (2 Tarefas)";
+      }
+
+      if (btn) {
+        btn.disabled = false;
+        btn.className = "btn btn-success d-flex align-items-center gap-1";
+        btn.innerHTML = `<i class="bi bi-box-arrow-up-right"></i> Redmines #${fluxoIssueId} e #${sqlIssueId}`;
+        btn.onclick = () => window.open(`https://redmine.tjce.jus.br/issues/${fluxoIssueId}`, '_blank');
+      }
+
+      if (alertEl && alertText) {
+        alertEl.classList.remove("d-none", "alert-danger");
+        alertEl.classList.add("alert-success");
+        const urlFluxo = `https://redmine.tjce.jus.br/issues/${fluxoIssueId}`;
+        const urlSql = `https://redmine.tjce.jus.br/issues/${sqlIssueId}`;
+        alertText.innerHTML = isDryRun ? `
+          <span><i class="bi bi-check-circle-fill text-success me-1"></i><b>Simulação Dupla Concluída com Sucesso!</b> 2 tarefas simuladas e salvas no banco: <b>#${fluxoIssueId} (Fluxo)</b> e <b>#${sqlIssueId} (SQL)</b>.</span>
+        ` : `
+          <span><b>Sucesso!</b> Ambas as tarefas criadas no Redmine e salvas no banco de dados!</span>
+          <a href="${urlFluxo}" target="_blank" class="btn btn-sm btn-outline-success ms-2 py-0 px-2 text-decoration-none">
+            #${fluxoIssueId} Fluxo <i class="bi bi-box-arrow-up-right ms-1"></i>
+          </a>
+          <a href="${urlSql}" target="_blank" class="btn btn-sm btn-outline-info ms-2 py-0 px-2 text-decoration-none">
+            #${sqlIssueId} SQL <i class="bi bi-box-arrow-up-right ms-1"></i>
+          </a>
+        `;
+      }
+    } catch (err) {
+      console.error("Erro no processo duplo:", err);
+      appendLog(`Erro: ${err.message}`, true);
+      if (logsStatus) {
+        logsStatus.className = "badge bg-danger";
+        logsStatus.textContent = "Erro";
+      }
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = originalBtnHtml || '<i class="bi bi-cloud-arrow-up-fill"></i> Tentar Novamente';
+      }
+      if (alertEl && alertText) {
+        alertEl.classList.remove("d-none", "alert-success");
+        alertEl.classList.add("alert-danger");
+        alertText.textContent = `Erro no processo: ${err.message}`;
+      }
+    }
+    return;
+  }
+
+  // CASO COMMIT DE NATUREZA ÚNICA (Apenas XML ou Apenas SQL)
+  const isOnlySql = hasSql && !hasXml;
+  const natureza = isOnlySql ? "sql" : "fluxo";
+  const defaultAct = isOnlySql
+    ? "Desenvolvimento - Criar/Manter scripts para extração de dados do banco de dados"
+    : "Desenvolvimento - Criar/Manter tarefa de automação";
+  const inputActivity = document.getElementById("icInputActivityType");
+  const activityType = inputActivity ? inputActivity.value : defaultAct;
+
+  const quantityEl = document.getElementById("icInputQuantity");
   let icCount = quantityEl ? parseInt(quantityEl.value, 10) : (currentModalCommit ? (currentModalCommit.ic_count || 1) : 1);
   if (isNaN(icCount) || icCount < 1) icCount = 1;
 
@@ -1119,7 +1499,8 @@ async function createICDirectlyInRedmine(btn, isDryRun = false) {
         commit_hash: commitHash,
         commit_url: commitUrl,
         ic_count: icCount,
-        activity_type: "Desenvolvimento - Criar/Manter tarefa de automação",
+        natureza: natureza,
+        activity_type: activityType,
         complexity: complexity,
         dry_run: isDryRun,
       }),
@@ -1135,26 +1516,50 @@ async function createICDirectlyInRedmine(btn, isDryRun = false) {
     }
 
     if (data.success) {
+      const issueId = data.issue_id;
+      const issueUrl = data.issue_url || `https://redmine.tjce.jus.br/issues/${issueId}`;
+
       // Set Redmine ID and link for both simulation and real creation
       const redmineIdEl = document.getElementById("icInputRedmineId");
-      if (redmineIdEl && data.issue_id) {
-        redmineIdEl.value = data.issue_id;
+      if (redmineIdEl && issueId) {
+        redmineIdEl.value = issueId;
       }
       const redmineLinkEl = document.getElementById("icLinkRedmine");
-      if (redmineLinkEl && data.issue_id) {
-        redmineLinkEl.href = data.issue_url || `https://redmine.tjce.jus.br/issues/${data.issue_id}`;
+      if (redmineLinkEl && issueId) {
+        redmineLinkEl.href = issueUrl;
         redmineLinkEl.classList.remove("d-none");
       }
 
-      // Update currentModalCommit state
+      // Update currentModalCommit state per nature
       if (currentModalCommit) {
+        if (natureza === 'sql') {
+          currentModalCommit.redmine_id_sql = issueId;
+          currentModalCommit.is_saved_sql = true;
+        } else {
+          currentModalCommit.redmine_id_fluxo = issueId;
+          currentModalCommit.is_saved_fluxo = true;
+        }
         currentModalCommit.is_saved = true;
-        currentModalCommit.redmine_id = data.issue_id;
+        currentModalCommit.redmine_id = issueId;
+
         if (window.COMMITS_STORE && currentModalCommit.hash && window.COMMITS_STORE[currentModalCommit.hash]) {
-          window.COMMITS_STORE[currentModalCommit.hash].is_saved = true;
-          window.COMMITS_STORE[currentModalCommit.hash].redmine_id = data.issue_id;
+          const stored = window.COMMITS_STORE[currentModalCommit.hash];
+          if (natureza === 'sql') {
+            stored.redmine_id_sql = issueId;
+            stored.is_saved_sql = true;
+          } else {
+            stored.redmine_id_fluxo = issueId;
+            stored.is_saved_fluxo = true;
+          }
+          stored.is_saved = true;
+          stored.redmine_id = issueId;
         }
       }
+
+      // Update tab badges inside modal, re-render current nature, and update table status
+      updateNatureTabBadges(currentModalCommit);
+      renderModalForCurrentNature();
+      updateTableStatusCell(currentModalCommit);
 
       if (data.dry_run) {
         if (logsStatus) {
@@ -1165,26 +1570,15 @@ async function createICDirectlyInRedmine(btn, isDryRun = false) {
         if (btn) {
           btn.disabled = false;
           btn.className = "btn btn-outline-success d-flex align-items-center gap-1";
-          btn.innerHTML = `<i class="bi bi-check2-circle"></i> Simulado (#${data.issue_id})`;
+          btn.innerHTML = `<i class="bi bi-check2-circle"></i> Simulado (${natureza.toUpperCase()} #${issueId})`;
         }
 
         if (alertEl && alertText) {
           alertEl.classList.remove("d-none", "alert-danger");
           alertEl.classList.add("alert-success");
           alertText.innerHTML = `
-            <span><i class="bi bi-check-circle-fill text-success me-1"></i><b>Simulação Concluída e Salva no Banco!</b> Tarefa simulada <b>#${data.issue_id}</b> registrada no banco de dados com status <i>criado</i> (nenhuma tarefa real foi criada no Redmine).</span>
+            <span><i class="bi bi-check-circle-fill text-success me-1"></i><b>Simulação (${natureza.toUpperCase()}) Concluída e Salva no Banco!</b> Tarefa simulada <b>#${issueId}</b> registrada no banco de dados com status <i>criado</i> (nenhuma tarefa real foi criada no Redmine).</span>
           `;
-        }
-
-        if (currentModalCommit && currentModalCommit.hash) {
-          const cell = document.getElementById(`status-cell-${currentModalCommit.hash}`);
-          if (cell) {
-            cell.innerHTML = `
-              <span class="badge bg-info-subtle text-info border border-info-subtle font-monospace d-inline-flex align-items-center gap-1" title="IC Simulado salvo no banco (#${data.issue_id})">
-                <i class="bi bi-check-circle-fill"></i> #${data.issue_id} (Simulado)
-              </span>
-            `;
-          }
         }
       } else {
         if (logsStatus) {
@@ -1195,30 +1589,19 @@ async function createICDirectlyInRedmine(btn, isDryRun = false) {
         if (btn) {
           btn.disabled = false;
           btn.className = "btn btn-success d-flex align-items-center gap-1";
-          btn.innerHTML = `<i class="bi bi-box-arrow-up-right"></i> Redmine #${data.issue_id}`;
-          btn.onclick = () => window.open(data.issue_url, '_blank');
+          btn.innerHTML = `<i class="bi bi-box-arrow-up-right"></i> Redmine #${issueId}`;
+          btn.onclick = () => window.open(issueUrl, '_blank');
         }
 
         if (alertEl && alertText) {
           alertEl.classList.remove("d-none", "alert-danger");
           alertEl.classList.add("alert-success");
           alertText.innerHTML = `
-            <span><b>Sucesso!</b> Tarefa <b>#${data.issue_id}</b> criada no Redmine e salva no banco de dados!</span>
-            <a href="${data.issue_url}" target="_blank" class="btn btn-sm btn-outline-success ms-2 py-0 px-2 text-decoration-none">
+            <span><b>Sucesso!</b> Tarefa (${natureza.toUpperCase()}) <b>#${issueId}</b> criada no Redmine e salva no banco de dados!</span>
+            <a href="${issueUrl}" target="_blank" class="btn btn-sm btn-outline-success ms-2 py-0 px-2 text-decoration-none">
               Abrir Tarefa <i class="bi bi-box-arrow-up-right ms-1"></i>
             </a>
           `;
-        }
-
-        if (currentModalCommit && currentModalCommit.hash) {
-          const cell = document.getElementById(`status-cell-${currentModalCommit.hash}`);
-          if (cell) {
-            cell.innerHTML = `
-              <a href="${data.issue_url}" target="_blank" class="badge bg-success text-decoration-none d-inline-flex align-items-center gap-1" title="Abrir tarefa no Redmine">
-                <i class="bi bi-check-circle-fill"></i> #${data.issue_id}
-              </a>
-            `;
-          }
         }
       }
     } else {
@@ -1341,16 +1724,25 @@ async function loadMoreCommits() {
         `;
 
         let metricsHtml = "";
-        if (c.ic_count && c.ic_count > 0) {
+        if (c.tem_ambos_ajustes) {
           metricsHtml += `
-            <span class="badge bg-warning text-dark fw-bold" title="${c.ic_count} IC(s) calculados (+${c.ic_added_count || 0} add / -${c.ic_removed_count || 0} rem)">
-              <i class="bi bi-tag-fill me-1"></i>${c.ic_count} ICs
+            <span class="badge bg-warning text-dark fw-bold" title="${c.ic_count_xml || 1} IC(s) de Fluxo (XML)">
+              <i class="bi bi-diagram-3-fill me-1"></i>${c.ic_count_xml || 1} Fluxo
+            </span>
+            <span class="badge text-dark fw-bold" style="background-color: #22d3ee;" title="${c.ic_count_sql || 1} IC(s) de Banco (SQL)">
+              <i class="bi bi-database-fill me-1"></i>${c.ic_count_sql || 1} SQL
             </span>
           `;
         } else if (c.has_xml_changes) {
           metricsHtml += `
-            <span class="badge bg-warning text-dark" title="${c.xml_files_count || 0} arquivo(s) XML">
-              <i class="bi bi-filetype-xml"></i> ${c.xml_files_count || 0} XML
+            <span class="badge bg-warning text-dark fw-bold" title="${c.ic_count_xml || c.xml_files_count || 1} IC(s) de Fluxo (XML)">
+              <i class="bi bi-diagram-3-fill me-1"></i>${c.ic_count_xml || c.xml_files_count || 1} Fluxo
+            </span>
+          `;
+        } else if (c.has_sql_changes) {
+          metricsHtml += `
+            <span class="badge text-dark fw-bold" style="background-color: #22d3ee;" title="${c.ic_count_sql || c.sql_files_count || 1} IC(s) de Banco (SQL)">
+              <i class="bi bi-database-fill me-1"></i>${c.ic_count_sql || c.sql_files_count || 1} SQL
             </span>
           `;
         }
@@ -1366,55 +1758,76 @@ async function loadMoreCommits() {
         }
 
         let statusHtml = "";
-        if (c.is_saved) {
-          statusHtml = `
-            <span class="badge bg-success-subtle text-success border border-success-subtle" title="Item de Catálogo já salvo no PostgreSQL">
-              <i class="bi bi-check-circle-fill me-1"></i>Salvo
-            </span>
-          `;
+        if (c.tem_ambos_ajustes) {
+          let flx = c.redmine_id_fluxo 
+            ? `<a href="https://redmine.tjce.jus.br/issues/${c.redmine_id_fluxo}" target="_blank" class="badge bg-warning text-dark fw-bold text-decoration-none d-inline-flex align-items-center gap-1" title="Redmine de Fluxo (.xml)"><i class="bi bi-diagram-3-fill"></i> #${c.redmine_id_fluxo}</a>`
+            : (c.is_saved_fluxo ? `<span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle d-inline-flex align-items-center gap-1" title="Fluxo salvo no banco de dados"><i class="bi bi-diagram-3"></i> Fluxo Salvo</span>` : `<span class="badge bg-secondary-subtle text-muted border border-secondary-subtle d-inline-flex align-items-center gap-1" title="Fluxo pendente"><i class="bi bi-diagram-3"></i> Fluxo Pendente</span>`);
+          let sql = c.redmine_id_sql
+            ? `<a href="https://redmine.tjce.jus.br/issues/${c.redmine_id_sql}" target="_blank" class="badge text-dark fw-bold text-decoration-none d-inline-flex align-items-center gap-1" style="background-color: #22d3ee;" title="Redmine de Scripts SQL (.sql)"><i class="bi bi-database-fill"></i> #${c.redmine_id_sql}</a>`
+            : (c.is_saved_sql ? `<span class="badge text-info border border-info-subtle d-inline-flex align-items-center gap-1" style="background-color: rgba(34, 211, 238, 0.15);" title="SQL salvo no banco de dados"><i class="bi bi-database"></i> SQL Salvo</span>` : `<span class="badge bg-secondary-subtle text-muted border border-secondary-subtle d-inline-flex align-items-center gap-1" title="SQL pendente"><i class="bi bi-database"></i> SQL Pendente</span>`);
+          statusHtml = `<div class="d-flex flex-column gap-1 align-items-center">${flx}${sql}</div>`;
+        } else if (c.redmine_id) {
+          if (c.has_sql_changes) {
+            statusHtml = `<a href="https://redmine.tjce.jus.br/issues/${c.redmine_id}" target="_blank" class="badge text-dark fw-bold text-decoration-none d-inline-flex align-items-center gap-1" style="background-color: #22d3ee;" title="Redmine de Scripts SQL (.sql)"><i class="bi bi-database-fill"></i> #${c.redmine_id}</a>`;
+          } else if (c.has_xml_changes) {
+            statusHtml = `<a href="https://redmine.tjce.jus.br/issues/${c.redmine_id}" target="_blank" class="badge bg-warning text-dark fw-bold text-decoration-none d-inline-flex align-items-center gap-1" title="Redmine de Fluxo (.xml)"><i class="bi bi-diagram-3-fill"></i> #${c.redmine_id}</a>`;
+          } else {
+            statusHtml = `<a href="https://redmine.tjce.jus.br/issues/${c.redmine_id}" target="_blank" class="badge bg-success text-decoration-none d-inline-flex align-items-center gap-1" title="Abrir tarefa no Redmine"><i class="bi bi-check-circle-fill"></i> #${c.redmine_id}</a>`;
+          }
+        } else if (c.is_saved) {
+          if (c.has_sql_changes) {
+            statusHtml = `<span class="badge text-info border border-info-subtle d-inline-flex align-items-center gap-1" style="background-color: rgba(34, 211, 238, 0.15);" title="Item salvo no PostgreSQL"><i class="bi bi-database me-1"></i>Salvo</span>`;
+          } else if (c.has_xml_changes) {
+            statusHtml = `<span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle d-inline-flex align-items-center gap-1" title="Item salvo no PostgreSQL"><i class="bi bi-diagram-3 me-1"></i>Salvo</span>`;
+          } else {
+            statusHtml = `<span class="badge bg-success-subtle text-success border border-success-subtle" title="Item de Catálogo já salvo no PostgreSQL"><i class="bi bi-check-circle-fill me-1"></i>Salvo</span>`;
+          }
         } else {
-          statusHtml = `
-            <span class="badge bg-secondary-subtle text-muted border border-secondary-subtle" title="Não salvo no banco de dados">
-              Não Salvo
-            </span>
-          `;
+          statusHtml = `<span class="badge bg-secondary-subtle text-muted border border-secondary-subtle" title="Não salvo no banco de dados">Não Salvo</span>`;
         }
 
+        const actionHtml = `
+          <button type="button" class="btn btn-sm btn-primary-custom py-1 px-2 small d-inline-flex align-items-center gap-1"
+                  onclick="openCreateICByHash('${c.hash}')"
+                  title="Gerar Item de Catálogo para este commit">
+            <i class="bi bi-card-checklist"></i>
+            <span>Criar IC</span>
+          </button>
+        `;
+
         tr.innerHTML = `
-          <td><div class="d-flex align-items-center gap-1">${hashHtml}</div></td>
-          <td class="text-muted small">${c.commit_date || ""}</td>
-          <td><div class="fw-medium text-light small">${escapeHtml(c.author || "")}</div></td>
-          <td>
+          <td data-col="hash"><div class="d-flex align-items-center gap-1">${hashHtml}</div></td>
+          <td data-col="date" class="text-muted small">${c.commit_date || ""}</td>
+          <td data-col="author"><div class="fw-medium text-light small">${escapeHtml(c.author || "")}</div></td>
+          <td data-col="repo">
             <span class="badge bg-dark border border-secondary text-info small text-truncate d-inline-block" style="max-width: 120px;" title="Repositório: ${escapeHtml(c.repo_name || "Local")}">
               <i class="bi bi-folder2 me-1"></i>${escapeHtml(c.repo_name || "Local")}
             </span>
           </td>
-          <td>
+          <td data-col="branch">
             ${c.branch ? `
               <span class="badge bg-primary-subtle text-primary border border-primary-subtle small text-truncate d-inline-block" style="max-width: 140px; font-family: 'JetBrains Mono', monospace; font-size: 0.72rem;" title="Branch de Origem: ${escapeHtml(c.branch)}">
                 <i class="bi bi-diagram-2 me-1"></i>${escapeHtml(c.branch)}
               </span>
             ` : `<span class="text-muted small">-</span>`}
           </td>
-          <td><div class="text-light">${escapeHtml(c.message || "")}</div></td>
-          <td class="text-center">
+          <td data-col="message"><div class="text-light">${escapeHtml(c.message || "")}</div></td>
+          <td data-col="files" class="text-center">
             <div class="d-flex align-items-center justify-content-center gap-1 flex-wrap">
               ${metricsHtml}
             </div>
           </td>
-          <td class="text-center" id="status-cell-${c.hash}">${statusHtml}</td>
-          <td class="text-center">
-            <button type="button" class="btn btn-sm btn-primary-custom py-1 px-2 small d-inline-flex align-items-center gap-1"
-                    onclick="openCreateICByHash('${c.hash}')"
-                    title="Gerar Item de Catálogo (IC) para este commit">
-              <i class="bi bi-card-checklist"></i>
-              <span>Criar IC</span>
-            </button>
-          </td>
+          <td data-col="status" class="text-center" id="status-cell-${c.hash}">${statusHtml}</td>
+          <td data-col="actions" class="text-center">${actionHtml}</td>
         `;
 
         tbody.appendChild(tr);
       });
+
+      // Apply active column filters to newly added rows
+      if (typeof applyTableColumnVisibility === "function") {
+        applyTableColumnVisibility();
+      }
 
       // Update total loaded count
       const totalLoaded = tbody.querySelectorAll("tr:not(#emptyCommitsRow)").length;

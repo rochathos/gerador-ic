@@ -210,7 +210,29 @@
           </h5>
           <p class="text-muted small mb-0">Cada commit gera um Item de Catálogo (IC) individual pronto para envio ao Redmine.</p>
         </div>
-        <div class="d-flex gap-2">
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+          <div class="dropdown">
+            <button class="btn btn-sm btn-secondary-custom dropdown-toggle d-inline-flex align-items-center gap-2" type="button" id="colSelectorBtnIndex" data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false" title="Configurar colunas visíveis da tabela">
+              <i class="bi bi-layout-three-columns text-primary"></i>
+              <span>Colunas</span>
+              <span class="badge bg-primary-subtle text-primary border border-primary-subtle col-count-badge" style="font-size: 0.72rem;">9/9</span>
+            </button>
+            <div class="dropdown-menu dropdown-menu-end column-toggle-menu shadow-lg p-3" aria-labelledby="colSelectorBtnIndex">
+              <div class="d-flex align-items-center justify-content-between pb-2 mb-2 border-bottom border-secondary border-opacity-25">
+                <span class="fw-bold small text-light d-flex align-items-center gap-1">
+                  <i class="bi bi-toggles text-primary"></i> Colunas da Tabela
+                </span>
+                <div class="d-flex align-items-center gap-2">
+                  <button type="button" class="btn btn-link btn-xs p-0 text-info text-decoration-none small" style="font-size: 0.75rem;" onclick="toggleAllTableColumns(true)" title="Selecionar todas">Todas</button>
+                  <span class="text-secondary small">|</span>
+                  <button type="button" class="btn btn-link btn-xs p-0 text-muted text-decoration-none small" style="font-size: 0.75rem;" onclick="resetTableColumns()" title="Restaurar padrão">Padrão</button>
+                </div>
+              </div>
+              <div class="column-selector-list d-flex flex-column gap-1">
+                <!-- Inserido dinamicamente via JS -->
+              </div>
+            </div>
+          </div>
           <a href="/commits" class="btn btn-sm btn-secondary-custom">
             <i class="bi bi-arrows-fullscreen me-1"></i> Expandir Tabela
           </a>
@@ -221,20 +243,22 @@
         <table class="table table-custom align-middle">
           <thead>
             <tr>
-              <th style="width: 120px;">Hash</th>
-              <th style="width: 150px; white-space: nowrap;">Data/Hora</th>
-              <th style="width: 170px;">Autor</th>
-              <th style="width: 160px; white-space: nowrap;">Branch de Origem</th>
-              <th>Mensagem do Commit</th>
-              <th style="width: 140px;" class="text-center">Arquivos</th>
-              <th style="width: 120px;" class="text-center">Criar IC</th>
+              <th data-col="hash" style="width: 120px;">Hash</th>
+              <th data-col="date" style="width: 140px; white-space: nowrap;">Data/Hora</th>
+              <th data-col="author" style="width: 160px;">Autor</th>
+              <th data-col="repo" style="width: 120px;">Repositório</th>
+              <th data-col="branch" style="width: 140px; white-space: nowrap;">Branch</th>
+              <th data-col="message">Mensagem do Commit</th>
+              <th data-col="files" style="width: 170px;" class="text-center">Arquivos / Ajustes</th>
+              <th data-col="status" style="width: 140px;" class="text-center">Status IC</th>
+              <th data-col="actions" style="width: 140px;" class="text-center">Criar IC</th>
             </tr>
           </thead>
           <tbody>
             {% if commits %}
               {% for commit in commits[:15] %}
-              <tr>
-                <td>
+              <tr id="row-commit-{{ commit.hash }}">
+                <td data-col="hash">
                   <div class="d-flex align-items-center gap-1">
                     {% if commit.web_commit_url %}
                     <a href="{{ commit.web_commit_url }}" target="_blank" class="badge-hash text-decoration-none d-inline-flex align-items-center gap-1" title="Abrir commit no GitLab/GitHub">
@@ -251,16 +275,22 @@
                     </button>
                   </div>
                 </td>
-                <td class="text-muted small">
+                <td data-col="date" class="text-muted small">
                   {{ commit.commit_date.strftime("%d/%m/%Y %H:%M") if commit.commit_date.strftime is defined else commit.commit_date }}
                 </td>
-                <td>
+                <td data-col="author">
                   <div class="fw-medium text-light small">{{ commit.author }}</div>
+                </td>
+                <td data-col="repo">
                   {% if commit.repo_name %}
-                  <span class="badge bg-secondary-subtle text-secondary small" style="font-size:0.7rem;">{{ commit.repo_name }}</span>
+                  <span class="badge bg-dark border border-secondary text-info small text-truncate d-inline-block" style="max-width: 120px;" title="Repositório: {{ commit.repo_name }}">
+                    <i class="bi bi-folder2 me-1"></i>{{ commit.repo_name }}
+                  </span>
+                  {% else %}
+                  <span class="text-muted small">-</span>
                   {% endif %}
                 </td>
-                <td>
+                <td data-col="branch">
                   {% if commit.branch %}
                   <span class="badge bg-primary-subtle text-primary border border-primary-subtle small text-truncate d-inline-block" style="max-width: 135px; font-family: 'JetBrains Mono', monospace; font-size: 0.72rem;" title="Branch de Origem: {{ commit.branch }}">
                     <i class="bi bi-diagram-2 me-1"></i>{{ commit.branch }}
@@ -269,19 +299,26 @@
                   <span class="text-muted small">-</span>
                   {% endif %}
                 </td>
-                <td>
+                <td data-col="message">
                   <div class="text-light fw-medium">{{ commit.message }}</div>
                 </td>
-                <td class="text-center">
+                <td data-col="files" class="text-center">
                   <div class="d-flex align-items-center justify-content-center gap-1 flex-wrap">
-                    {% if commit.ic_count and commit.ic_count > 0 %}
-                    <span class="badge bg-warning text-dark fw-bold" title="{{ commit.ic_count }} IC(s) calculados (+{{ commit.ic_added_count or 0 }} add / -{{ commit.ic_removed_count or 0 }} rem)">
-                      <i class="bi bi-tag-fill me-1"></i>{{ commit.ic_count }} ICs
-                    </span>
+                    {% if commit.tem_ambos_ajustes %}
+                      <span class="badge bg-warning text-dark fw-bold" title="{{ commit.ic_fluxo_count }} IC(s) de Fluxo (XML)">
+                        <i class="bi bi-diagram-3-fill me-1"></i>{{ commit.ic_fluxo_count }} Fluxo
+                      </span>
+                      <span class="badge text-dark fw-bold" style="background-color: #22d3ee;" title="{{ commit.ic_sql_count }} IC(s) de Banco (SQL)">
+                        <i class="bi bi-database-fill me-1"></i>{{ commit.ic_sql_count }} SQL
+                      </span>
                     {% elif commit.has_xml_changes %}
-                    <span class="badge bg-warning text-dark" title="{{ commit.xml_files_count }} arquivo(s) XML: +{{ commit.xml_insertions }} / -{{ commit.xml_deletions }} edições">
-                      <i class="bi bi-filetype-xml"></i> {{ commit.xml_files_count }} XML
-                    </span>
+                      <span class="badge bg-warning text-dark fw-bold" title="{{ commit.ic_fluxo_count }} IC(s) de Fluxo (XML)">
+                        <i class="bi bi-diagram-3-fill me-1"></i>{{ commit.ic_fluxo_count }} Fluxo
+                      </span>
+                    {% elif commit.has_sql_changes %}
+                      <span class="badge text-dark fw-bold" style="background-color: #22d3ee;" title="{{ commit.ic_sql_count }} IC(s) de Banco (SQL)">
+                        <i class="bi bi-database-fill me-1"></i>{{ commit.ic_sql_count }} SQL
+                      </span>
                     {% endif %}
                     {% if commit.files_changed %}
                     <button type="button" class="btn btn-sm btn-secondary-custom py-1 px-2 small" onclick="viewFilesByHash('{{ commit.hash }}')">
@@ -292,10 +329,77 @@
                     {% endif %}
                   </div>
                 </td>
-                <td class="text-center">
+                <td data-col="status" class="text-center" id="status-cell-{{ commit.hash }}">
+                  {% if commit.tem_ambos_ajustes %}
+                    <div class="d-flex flex-column gap-1 align-items-center">
+                      {% if commit.redmine_id_fluxo %}
+                        <a href="https://redmine.tjce.jus.br/issues/{{ commit.redmine_id_fluxo }}" target="_blank" class="badge bg-warning text-dark fw-bold text-decoration-none d-inline-flex align-items-center gap-1" title="Redmine de Fluxo (.xml)">
+                          <i class="bi bi-diagram-3-fill"></i> #{{ commit.redmine_id_fluxo }}
+                        </a>
+                      {% elif commit.is_saved_fluxo %}
+                        <span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle d-inline-flex align-items-center gap-1" title="Fluxo salvo no banco de dados">
+                          <i class="bi bi-diagram-3"></i> Fluxo Salvo
+                        </span>
+                      {% else %}
+                        <span class="badge bg-secondary-subtle text-muted border border-secondary-subtle d-inline-flex align-items-center gap-1" title="Fluxo pendente">
+                          <i class="bi bi-diagram-3"></i> Fluxo Pendente
+                        </span>
+                      {% endif %}
+
+                      {% if commit.redmine_id_sql %}
+                        <a href="https://redmine.tjce.jus.br/issues/{{ commit.redmine_id_sql }}" target="_blank" class="badge text-dark fw-bold text-decoration-none d-inline-flex align-items-center gap-1" style="background-color: #22d3ee;" title="Redmine de Scripts SQL (.sql)">
+                          <i class="bi bi-database-fill"></i> #{{ commit.redmine_id_sql }}
+                        </a>
+                      {% elif commit.is_saved_sql %}
+                        <span class="badge text-info border border-info-subtle d-inline-flex align-items-center gap-1" style="background-color: rgba(34, 211, 238, 0.15);" title="SQL salvo no banco de dados">
+                          <i class="bi bi-database"></i> SQL Salvo
+                        </span>
+                      {% else %}
+                        <span class="badge bg-secondary-subtle text-muted border border-secondary-subtle d-inline-flex align-items-center gap-1" title="SQL pendente">
+                          <i class="bi bi-database"></i> SQL Pendente
+                        </span>
+                      {% endif %}
+                    </div>
+                  {% elif commit.is_saved or commit.redmine_id %}
+                    {% if commit.redmine_id %}
+                      {% if commit.has_sql_changes %}
+                        <a href="https://redmine.tjce.jus.br/issues/{{ commit.redmine_id }}" target="_blank" class="badge text-dark fw-bold text-decoration-none d-inline-flex align-items-center gap-1" style="background-color: #22d3ee;" title="Redmine de Scripts SQL (.sql)">
+                          <i class="bi bi-database-fill"></i> #{{ commit.redmine_id }}
+                        </a>
+                      {% elif commit.has_xml_changes %}
+                        <a href="https://redmine.tjce.jus.br/issues/{{ commit.redmine_id }}" target="_blank" class="badge bg-warning text-dark fw-bold text-decoration-none d-inline-flex align-items-center gap-1" title="Redmine de Fluxo (.xml)">
+                          <i class="bi bi-diagram-3-fill"></i> #{{ commit.redmine_id }}
+                        </a>
+                      {% else %}
+                        <a href="https://redmine.tjce.jus.br/issues/{{ commit.redmine_id }}" target="_blank" class="badge bg-success text-decoration-none d-inline-flex align-items-center gap-1" title="Abrir tarefa no Redmine">
+                          <i class="bi bi-check-circle-fill"></i> #{{ commit.redmine_id }}
+                        </a>
+                      {% endif %}
+                    {% else %}
+                      {% if commit.has_sql_changes %}
+                        <span class="badge text-info border border-info-subtle d-inline-flex align-items-center gap-1" style="background-color: rgba(34, 211, 238, 0.15);" title="Item salvo no PostgreSQL">
+                          <i class="bi bi-database me-1"></i>Salvo
+                        </span>
+                      {% elif commit.has_xml_changes %}
+                        <span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle d-inline-flex align-items-center gap-1" title="Item salvo no PostgreSQL">
+                          <i class="bi bi-diagram-3 me-1"></i>Salvo
+                        </span>
+                      {% else %}
+                        <span class="badge bg-success-subtle text-success border border-success-subtle" title="Item de Catálogo salvo no PostgreSQL">
+                          <i class="bi bi-check-circle-fill me-1"></i>Salvo
+                        </span>
+                      {% endif %}
+                    {% endif %}
+                  {% else %}
+                    <span class="badge bg-secondary-subtle text-muted border border-secondary-subtle" title="Não salvo no banco de dados">
+                      Não Salvo
+                    </span>
+                  {% endif %}
+                </td>
+                <td data-col="actions" class="text-center">
                   <button type="button" class="btn btn-sm btn-primary-custom py-1 px-2 small d-inline-flex align-items-center gap-1"
                           onclick="openCreateICByHash('{{ commit.hash }}')"
-                          title="Gerar Item de Catálogo (IC) para este commit">
+                          title="Gerar Item de Catálogo para este commit">
                     <i class="bi bi-card-checklist"></i>
                     <span>Criar IC</span>
                   </button>
@@ -304,7 +408,7 @@
               {% endfor %}
             {% else %}
               <tr>
-                <td colspan="7" class="text-center py-5 text-muted">
+                <td colspan="9" class="text-center py-5 text-muted">
                   <i class="bi bi-inbox fs-2 d-block mb-2 text-dim"></i>
                   Nenhum commit encontrado no período selecionado.<br/>
                   Selecione outro período ou verifique o caminho do repositório Git.

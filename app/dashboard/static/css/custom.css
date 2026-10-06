@@ -493,3 +493,50 @@ body {
   border-radius: 3px;
   border: 1px solid rgba(255, 255, 255, 0.15);
 }
+
+/* Column Selector Dropdown & Table Column Customization */
+.column-toggle-menu {
+  min-width: 260px;
+  background: rgba(30, 41, 59, 0.95) !important;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  box-shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.6);
+  border-radius: var(--radius-sm);
+  z-index: 1050;
+  animation: fadeIn 0.15s ease-out;
+}
+
+.column-toggle-item {
+  padding: 0.35rem 0.5rem;
+  border-radius: 6px;
+  transition: var(--transition);
+}
+
+.column-toggle-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.column-toggle-item .form-check-input {
+  cursor: pointer;
+  background-color: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.25);
+  transition: var(--transition);
+}
+
+.column-toggle-item .form-check-input:checked {
+  background-color: var(--primary);
+  border-color: var(--primary);
+  box-shadow: 0 0 8px var(--primary-glow);
+}
+
+.column-toggle-item label {
+  cursor: pointer;
+  font-size: 0.84rem;
+}
+
+/* Hide column helper */
+.col-hidden {
+  display: none !important;
+}
+

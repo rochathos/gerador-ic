@@ -76,8 +76,12 @@ class RedmineService:
                 processed_lines.append(f"*** {stripped_left[2:]}")
             elif stripped_left.startswith("* Tags ") or stripped_left.startswith("* Tags:"):
                 processed_lines.append(f"** {stripped_left[2:]}")
+            elif stripped_left.startswith("* Casos de Uso"):
+                processed_lines.append(f"** {stripped_left[2:]}")
             elif line.startswith("- [XML]") or line.startswith("* [XML]"):
                 processed_lines.append(f"* [XML]{line[7:]}")
+            elif line.startswith("- [SQL]") or line.startswith("* [SQL]"):
+                processed_lines.append(f"* [SQL]{line[7:]}")
             elif line.startswith("- ") and not line.startswith("- -"):
                 processed_lines.append(f"* {line[2:]}")
             else:

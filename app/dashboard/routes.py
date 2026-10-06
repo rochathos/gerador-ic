@@ -1,6 +1,6 @@
 from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from urllib.parse import quote_plus
 from fastapi import APIRouter, Depends, Form, Request, Query
 from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse, JSONResponse
@@ -57,6 +57,74 @@ def check_is_commit_saved(c_hash: Optional[str], c_short_hash: Optional[str], sa
             if cand == sh_clean or cand.startswith(sh_clean) or sh_clean.startswith(cand):
                 return True
     return False
+
+
+def enrich_commits_with_saved_items(commits: List[Any], saved_items: List[CatalogItem]) -> None:
+    """Enrich commit objects or dictionaries with saved CatalogItem records per nature."""
+    saved_map: Dict[str, List[CatalogItem]] = {}
+    for si in saved_items:
+        if si.commit_hash:
+            h = si.commit_hash.strip().lower()
+            saved_map.setdefault(h, []).append(si)
+            saved_map.setdefault(h[:7], []).append(si)
+
+    for c in commits:
+        if isinstance(c, dict):
+            c_hash = (c.get("hash") or "").strip().lower()
+            c_short = (c.get("short_hash") or c_hash[:7]).strip().lower()
+        else:
+            c_hash = (getattr(c, "hash", "") or "").strip().lower()
+            c_short = (getattr(c, "short_hash", "") or c_hash[:7]).strip().lower()
+
+        raw_items = saved_map.get(c_hash) or saved_map.get(c_short) or []
+        items_dict = {i.id: i for i in raw_items}
+        items = list(items_dict.values())
+
+        # Prioritize items with non-empty redmine_id
+        it_fluxo = (
+            next((i for i in items if (i.natureza or "").lower() == "fluxo" and i.redmine_id), None)
+            or next((i for i in items if (i.natureza or "").lower() == "fluxo"), None)
+        )
+        it_sql = (
+            next((i for i in items if (i.natureza or "").lower() == "sql" and i.redmine_id), None)
+            or next((i for i in items if (i.natureza or "").lower() == "sql"), None)
+        )
+
+        if not it_fluxo and items:
+            it_fluxo = (
+                next((i for i in items if i != it_sql and i.redmine_id), None)
+                or next((i for i in items if i != it_sql), None)
+                or items[0]
+            )
+
+        r_fluxo = it_fluxo.redmine_id if it_fluxo else None
+        r_sql = it_sql.redmine_id if it_sql else None
+
+        if not r_fluxo:
+            other_with_redmine = next((i for i in items if i != it_sql and i.redmine_id), None)
+            if other_with_redmine:
+                it_fluxo = other_with_redmine
+                r_fluxo = it_fluxo.redmine_id
+
+        is_saved = len(items) > 0
+        is_saved_fluxo = (it_fluxo is not None)
+        is_saved_sql = (it_sql is not None)
+
+        if isinstance(c, dict):
+            c["is_saved"] = is_saved
+            c["is_saved_fluxo"] = is_saved_fluxo
+            c["is_saved_sql"] = is_saved_sql
+            c["redmine_id_fluxo"] = r_fluxo
+            c["redmine_id_sql"] = r_sql
+            c["redmine_id"] = r_fluxo or r_sql
+        else:
+            setattr(c, "is_saved", is_saved)
+            setattr(c, "is_saved_fluxo", is_saved_fluxo)
+            setattr(c, "is_saved_sql", is_saved_sql)
+            setattr(c, "redmine_id_fluxo", r_fluxo)
+            setattr(c, "redmine_id_sql", r_sql)
+            setattr(c, "redmine_id", r_fluxo or r_sql)
+
 
 
 @router.get("/", response_class=HTMLResponse)
@@ -159,11 +227,9 @@ def home_view(
             commits = list(db.execute(stmt_commits).scalars().all())
 
     # Check saved commits in database
-    saved_stmt = select(CatalogItem.commit_hash).where(CatalogItem.commit_hash.is_not(None))
-    saved_commit_hashes = {h.strip().lower() for h in db.execute(saved_stmt).scalars().all() if h}
-    for ci in commits:
-        if isinstance(ci, CommitItem):
-            ci.is_saved = check_is_commit_saved(ci.hash, ci.short_hash, saved_commit_hashes)
+    saved_stmt = select(CatalogItem).where(CatalogItem.commit_hash.is_not(None))
+    saved_items = list(db.execute(saved_stmt).scalars().all())
+    enrich_commits_with_saved_items(commits, saved_items)
 
     # Fetch metric totals
     total_commits = len(commits)
@@ -252,6 +318,9 @@ async def create_single_ic(
             status = payload.get("status", "salvo")
             commit_hash = payload.get("commit_hash", "")
             redmine_id = payload.get("redmine_id", "")
+            natureza = payload.get("natureza", "")
+            activity_type = payload.get("activity_type", "")
+            ic_count = payload.get("ic_count", 1)
         else:
             form_data = await request.form()
             title = form_data.get("title", "")
@@ -259,6 +328,9 @@ async def create_single_ic(
             status = form_data.get("status", "salvo")
             commit_hash = form_data.get("commit_hash", "")
             redmine_id = form_data.get("redmine_id", "")
+            natureza = form_data.get("natureza", "")
+            activity_type = form_data.get("activity_type", "")
+            ic_count = form_data.get("ic_count", 1)
 
         if not title:
             return JSONResponse(
@@ -268,21 +340,38 @@ async def create_single_ic(
 
         clean_hash = str(commit_hash).strip() if commit_hash else None
         clean_redmine_id = str(redmine_id).strip().lstrip("#") if redmine_id else None
+        clean_natureza = str(natureza).strip().lower() if natureza else ""
+        if not clean_natureza:
+            clean_natureza = "sql" if "banco" in (activity_type or "").lower() else "fluxo"
 
-        # Check if an IC already exists for this commit hash to avoid duplicates
+        # Check if an IC already exists for this commit hash and nature to avoid overwriting different IC types
         existing_item = None
         if clean_hash:
             short_prefix = clean_hash[:7].lower()
             stmt = select(CatalogItem).where(
-                (CatalogItem.commit_hash.ilike(f"{short_prefix}%")) |
-                (CatalogItem.commit_hash == clean_hash)
+                (
+                    (CatalogItem.commit_hash.ilike(f"{short_prefix}%")) |
+                    (CatalogItem.commit_hash == clean_hash)
+                ),
+                func.lower(CatalogItem.natureza) == clean_natureza,
             ).order_by(desc(CatalogItem.id)).limit(1)
             existing_item = db.execute(stmt).scalar_one_or_none()
+
+        default_act = (
+            "Desenvolvimento - Criar/Manter scripts para extração de dados do banco de dados"
+            if clean_natureza == "sql"
+            else "Desenvolvimento - Criar/Manter tarefa de automação"
+        )
+        final_activity = str(activity_type).strip() if activity_type else default_act
+        final_ic_count = int(ic_count) if str(ic_count).isdigit() else 1
 
         if existing_item:
             existing_item.title = str(title).strip()
             if description:
                 existing_item.description = str(description).strip()
+            existing_item.natureza = clean_natureza
+            existing_item.activity_type = final_activity
+            existing_item.ic_count = final_ic_count
             if clean_redmine_id:
                 existing_item.redmine_id = clean_redmine_id
                 existing_item.status = "criado"
@@ -297,12 +386,15 @@ async def create_single_ic(
                 status=final_status,
                 commit_hash=clean_hash,
                 redmine_id=clean_redmine_id,
+                natureza=clean_natureza,
+                activity_type=final_activity,
+                ic_count=final_ic_count,
             )
             db.add(item)
 
         db.commit()
         db.refresh(item)
-        logger.info(f"IC individual #{item.id} salvo com sucesso: status={item.status} hash={item.commit_hash} redmine_id={item.redmine_id} title={item.title[:50]}")
+        logger.info(f"IC individual #{item.id} salvo ({item.natureza}): status={item.status} hash={item.commit_hash} redmine_id={item.redmine_id} title={item.title[:50]}")
         return JSONResponse(
             status_code=200,
             content={
@@ -310,8 +402,11 @@ async def create_single_ic(
                 "id": item.id,
                 "title": item.title,
                 "status": item.status,
+                "natureza": item.natureza,
+                "activity_type": item.activity_type,
+                "ic_count": item.ic_count,
                 "redmine_id": item.redmine_id,
-                "message": f"Item de Catálogo #{item.id} salvo com sucesso no banco de dados com status '{item.status}'!",
+                "message": f"Item de Catálogo ({item.natureza.upper()}) #{item.id} salvo com sucesso no banco de dados com status '{item.status}'!",
             },
         )
     except Exception as exc:
@@ -373,8 +468,17 @@ async def api_create_redmine_ic(
         description = body.get("description", "").strip()
         commit_hash = body.get("commit_hash", "").strip()
         commit_url = body.get("commit_url", "").strip()
+        natureza = body.get("natureza", "").strip().lower()
         ic_count = body.get("ic_count", 1)
-        activity_type = body.get("activity_type", "Desenvolvimento - Criar/Manter tarefa de automação")
+        activity_type = body.get("activity_type", "").strip()
+        if not activity_type:
+            activity_type = (
+                "Desenvolvimento - Criar/Manter scripts para extração de dados do banco de dados"
+                if natureza == "sql"
+                else "Desenvolvimento - Criar/Manter tarefa de automação"
+            )
+        if not natureza:
+            natureza = "sql" if "banco" in activity_type.lower() else "fluxo"
         complexity = body.get("complexity", "Baixa")
         dry_run = bool(body.get("dry_run", False))
 
@@ -382,7 +486,7 @@ async def api_create_redmine_ic(
             return JSONResponse(status_code=400, content={"success": False, "message": "Título do IC é obrigatório."})
 
         mode_str = "SIMULAÇÃO" if dry_run else "CRIAÇÃO OFICIAL"
-        logger.info(f"[REDMINE API] [{mode_str}] Iniciando processo para IC: '{title[:50]}...' (Commit: {commit_hash})")
+        logger.info(f"[REDMINE API] [{mode_str}] Iniciando processo para IC ({natureza}): '{title[:50]}...' (Commit: {commit_hash})")
 
         success, issue_url, issue_id, step_logs = RedmineService.create_catalog_item_api(
             title=title,
@@ -396,7 +500,7 @@ async def api_create_redmine_ic(
         )
 
         if success and issue_id:
-            # Persist or update CatalogItem in PostgreSQL
+            # Persist or update CatalogItem in PostgreSQL per nature
             item = None
             if commit_hash:
                 clean_hash = commit_hash.strip().lower()
@@ -404,10 +508,12 @@ async def api_create_redmine_ic(
                     or_(
                         func.lower(CatalogItem.commit_hash) == clean_hash,
                         func.lower(CatalogItem.commit_hash).like(f"{clean_hash}%"),
-                    )
+                    ),
+                    func.lower(CatalogItem.natureza) == natureza,
                 )
                 item = db.execute(stmt).scalars().first()
 
+            final_ic_count = int(ic_count) if str(ic_count).isdigit() else 1
             if not item:
                 item = CatalogItem(
                     title=title,
@@ -415,6 +521,9 @@ async def api_create_redmine_ic(
                     status="criado",
                     redmine_id=str(issue_id),
                     commit_hash=commit_hash or None,
+                    natureza=natureza,
+                    activity_type=activity_type,
+                    ic_count=final_ic_count,
                 )
                 db.add(item)
             else:
@@ -422,10 +531,13 @@ async def api_create_redmine_ic(
                 item.redmine_id = str(issue_id)
                 item.title = title
                 item.description = description
+                item.natureza = natureza
+                item.activity_type = activity_type
+                item.ic_count = final_ic_count
 
             db.commit()
             db.refresh(item)
-            logger.info(f"[REDMINE API] Item de Catálogo #{item.id} vinculado à tarefa Redmine #{issue_id} com sucesso (dry_run={dry_run}).")
+            logger.info(f"[REDMINE API] Item de Catálogo #{item.id} ({natureza}) vinculado à tarefa Redmine #{issue_id} com sucesso (dry_run={dry_run}).")
 
             return JSONResponse(
                 status_code=200,
@@ -518,17 +630,16 @@ def commits_view(
                 skip=0,
                 limit=20,
             )
-            saved_stmt = select(CatalogItem.commit_hash).where(CatalogItem.commit_hash.is_not(None))
-            saved_commit_hashes = {h.strip().lower() for h in db.execute(saved_stmt).scalars().all() if h}
+            saved_stmt = select(CatalogItem).where(CatalogItem.commit_hash.is_not(None))
+            saved_items = list(db.execute(saved_stmt).scalars().all())
 
             for c in raw_commits:
-                ci = CommitItem(c)
-                ci.is_saved = check_is_commit_saved(ci.hash, ci.short_hash, saved_commit_hashes)
-                commits.append(ci)
+                commits.append(CommitItem(c))
+            enrich_commits_with_saved_items(commits, saved_items)
         except Exception as exc:
             logger.error(f"Erro ao buscar commits paginados do Git: {exc}")
     else:
-        saved_commit_hashes = set()
+        pass
 
     # XML summary metrics for loaded commits
     xml_commits_count = sum(1 for c in commits if c.has_xml_changes)
@@ -631,15 +742,12 @@ def api_commits_git_paged(
             limit=limit,
         )
 
-        saved_stmt = select(CatalogItem.commit_hash).where(CatalogItem.commit_hash.is_not(None))
-        saved_commit_hashes = {h.strip().lower() for h in db.execute(saved_stmt).scalars().all() if h}
+        saved_stmt = select(CatalogItem).where(CatalogItem.commit_hash.is_not(None))
+        saved_items = list(db.execute(saved_stmt).scalars().all())
 
-        commit_items = []
-        for c in raw_commits:
-            ci = CommitItem(c)
-            c_dict = ci.to_dict()
-            c_dict["is_saved"] = check_is_commit_saved(c.get("hash"), c.get("short_hash"), saved_commit_hashes)
-            commit_items.append(c_dict)
+        commit_objs = [CommitItem(c) for c in raw_commits]
+        enrich_commits_with_saved_items(commit_objs, saved_items)
+        commit_items = [ci.to_dict() for ci in commit_objs]
 
         return JSONResponse({
             "success": True,
@@ -663,7 +771,6 @@ def api_commits_inspect(
     clean_hash = commit_hash.strip()
 
     try:
-        from app.models.commit import CommitItem
         commit_data = GitService.get_commit_by_hash(active_repo, clean_hash)
         if not commit_data:
             return JSONResponse(
@@ -675,19 +782,9 @@ def api_commits_inspect(
         saved_items = list(db.execute(saved_stmt).scalars().all())
 
         ci = CommitItem(commit_data)
+        enrich_commits_with_saved_items([ci], saved_items)
         c_dict = ci.to_dict()
         c_dict["xml_analyzed"] = True
-        matching_item = None
-        for si in saved_items:
-            if si.commit_hash and (clean_hash.lower().startswith(si.commit_hash.lower()) or si.commit_hash.lower().startswith(clean_hash.lower())):
-                matching_item = si
-                break
-
-        c_dict["is_saved"] = matching_item is not None
-        if matching_item:
-            c_dict["catalog_item_id"] = matching_item.id
-            if matching_item.redmine_id:
-                c_dict["redmine_id"] = matching_item.redmine_id
 
         return JSONResponse({"success": True, "commit": c_dict})
     except Exception as exc:

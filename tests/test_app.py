@@ -354,5 +354,33 @@ def test_meeting_is_saved_status_and_card_layout():
         db.close()
 
 
+def test_commits_table_columns_selector():
+    """Test that commits tables in both home and commits page contain column customization selectors and attributes."""
+    # 1. Home page table
+    res_home = client.get("/")
+    assert res_home.status_code == 200
+    assert "column-selector-list" in res_home.text
+    assert 'data-col="hash"' in res_home.text
+    assert 'data-col="author"' in res_home.text
+    assert 'data-col="repo"' in res_home.text
+    assert 'data-col="branch"' in res_home.text
+    assert 'data-col="files"' in res_home.text
+    assert 'data-col="status"' in res_home.text
+    assert 'data-col="actions"' in res_home.text
+
+    # 2. Commits full page table
+    res_commits = client.get("/commits")
+    assert res_commits.status_code == 200
+    assert "column-selector-list" in res_commits.text
+    assert 'data-col="hash"' in res_commits.text
+    assert 'data-col="author"' in res_commits.text
+    assert 'data-col="repo"' in res_commits.text
+    assert 'data-col="branch"' in res_commits.text
+    assert 'data-col="files"' in res_commits.text
+    assert 'data-col="status"' in res_commits.text
+    assert 'data-col="actions"' in res_commits.text
+
+
+
 
 

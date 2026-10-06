@@ -121,10 +121,11 @@
               <th style="width: 70px;">ID</th>
               <th style="width: 140px;">Data Criação</th>
               <th style="width: 130px;">Commit</th>
-              <th style="width: 250px;">Título do IC</th>
+              <th style="width: 100px;" class="text-center">Natureza</th>
+              <th style="width: 240px;">Título do IC</th>
               <th style="width: 175px;">Nº Redmine</th>
               <th>Descrição Gerada</th>
-              <th style="width: 140px;" class="text-center">Status</th>
+              <th style="width: 130px;" class="text-center">Status</th>
               <th style="width: 160px;" class="text-end">Ações</th>
             </tr>
           </thead>
@@ -141,7 +142,7 @@
                   <div class="d-flex align-items-center gap-1">
                     <span class="badge-hash font-monospace">{{ ic.commit_hash[:7] }}</span>
                     <button type="button" class="btn btn-link btn-sm p-0 text-info"
-                            onclick="openCreateICByHash('{{ ic.commit_hash }}')"
+                            onclick="openCreateICByHash('{{ ic.commit_hash }}', '{{ ic.natureza or 'fluxo' }}')"
                             title="Inspecionar / Editar IC deste commit">
                       <i class="bi bi-box-arrow-up-right fs-6"></i>
                     </button>
@@ -153,8 +154,22 @@
                   <span class="text-muted small">-</span>
                   {% endif %}
                 </td>
+                <td class="text-center">
+                  {% if ic.natureza == 'sql' %}
+                  <span class="badge text-dark fw-bold" style="background-color: #22d3ee;" title="{{ ic.activity_type or 'Atividade de Banco de Dados' }}">
+                    <i class="bi bi-database-fill me-1"></i>SQL
+                  </span>
+                  {% else %}
+                  <span class="badge bg-warning text-dark fw-bold" title="{{ ic.activity_type or 'Atividade de Fluxo/Automação' }}">
+                    <i class="bi bi-diagram-3-fill me-1"></i>Fluxo
+                  </span>
+                  {% endif %}
+                </td>
                 <td>
                   <div class="fw-semibold text-light text-break">{{ ic.title }}</div>
+                  {% if ic.activity_type %}
+                  <div class="text-muted small text-truncate" style="font-size:0.7rem; max-width: 230px;" title="{{ ic.activity_type }}">{{ ic.activity_type }}</div>
+                  {% endif %}
                 </td>
                 <td id="redmine-col-{{ ic.id }}">
                   <div class="d-flex align-items-center gap-1" id="redmine-container-{{ ic.id }}">
