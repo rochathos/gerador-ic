@@ -42,6 +42,8 @@ def obter_diretorio_templates() -> Path:
 
 templates_dir = obter_diretorio_templates()
 templates = Jinja2Templates(directory=str(templates_dir))
+from app import __version__
+templates.env.globals["app_version"] = __version__
 
 
 def _get_default_period():

@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from app import __version__
 from app.core.config import settings
 from app.core.database import init_db
 from app.core.logger import logger
@@ -15,7 +16,7 @@ from app.dashboard.routes import router as dashboard_router
 async def lifespan(app: FastAPI):
     """Handle application startup and shutdown lifecycle events."""
     logger.info("==================================================================")
-    logger.info(f"Iniciando {settings.APP_NAME} (v1.0.0)")
+    logger.info(f"Iniciando {settings.APP_NAME} (v{__version__})")
     logger.info(f"Ambiente: {settings.APP_ENV} | Debug: {settings.APP_DEBUG}")
     logger.info(f"Acesse localmente em: http://{settings.APP_HOST}:{settings.APP_PORT}")
     logger.info("==================================================================")
@@ -31,7 +32,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title=settings.APP_NAME,
     description="Sistema automatizado de levantamento de atividades e geração de Itens de Catálogo (IC) no Redmine.",
-    version="1.0.0",
+    version=__version__,
     docs_url="/docs" if settings.APP_DEBUG else None,
     redoc_url="/redoc" if settings.APP_DEBUG else None,
     lifespan=lifespan,
