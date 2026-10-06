@@ -274,3 +274,72 @@ def test_api_redmine_simulacao_dois_redmines_mesmo_commit():
     for item in itens:
         db.delete(item)
     db.commit()
+
+
+def test_status_ic_badges_por_natureza():
+    """Valida que a coluna Status IC renderiza badges específicos (Fluxo Pendente, SQL Pendente) e nunca 'Não Salvo'."""
+    from jinja2 import Environment, FileSystemLoader
+    from app.models.commit import CommitItem
+
+    env = Environment(loader=FileSystemLoader("app/dashboard/templates"))
+    template = env.get_template("index.html")
+
+    # 1. Commit com apenas XML
+    commit_xml = CommitItem({
+        "hash": "1111111111111111111111111111111111111111",
+        "message": "Commit apenas XML",
+        "author": "Dev",
+        "files_changed": [{"filename": "fluxo.xml", "is_xml": True, "is_sql": False}],
+        "ic_count_xml": 1,
+        "ic_count_sql": 0,
+    })
+    html_xml = template.render(commits=[commit_xml], request={})
+    assert "Fluxo Pendente" in html_xml
+    assert "Não Salvo" not in html_xml
+
+    # 2. Commit com apenas SQL
+    commit_sql = CommitItem({
+        "hash": "2222222222222222222222222222222222222222",
+        "message": "Commit apenas SQL",
+        "author": "DBA",
+        "files_changed": [{"filename": "script.sql", "is_xml": False, "is_sql": True}],
+        "ic_count_xml": 0,
+        "ic_count_sql": 1,
+    })
+    html_sql = template.render(commits=[commit_sql], request={})
+    assert "SQL Pendente" in html_sql
+    assert "Não Salvo" not in html_sql
+
+    # 3. Commit com ambos XML e SQL
+    commit_ambos = CommitItem({
+        "hash": "3333333333333333333333333333333333333333",
+        "message": "Commit ambos XML e SQL",
+        "author": "Fullstack",
+        "files_changed": [
+            {"filename": "fluxo.xml", "is_xml": True, "is_sql": False},
+            {"filename": "script.sql", "is_xml": False, "is_sql": True},
+        ],
+        "ic_count_xml": 1,
+        "ic_count_sql": 1,
+    })
+    html_ambos = template.render(commits=[commit_ambos], request={})
+    assert "Fluxo Pendente" in html_ambos
+    assert "SQL Pendente" in html_ambos
+    assert "Não Salvo" not in html_ambos
+
+    # 4. Validar que commits.html tem o mesmo comportamento
+    template_commits = env.get_template("commits.html")
+    ctx_defaults = {"xml_commits_count": 0, "request": {}, "available_repos": [], "selected_repo": "", "filter_author": "", "filter_query": "", "filter_start_date": "", "filter_end_date": "", "only_xml": False}
+
+    html_commits_xml = template_commits.render(commits=[commit_xml], **ctx_defaults)
+    assert "Fluxo Pendente" in html_commits_xml
+    assert "Não Salvo" not in html_commits_xml
+
+    html_commits_sql = template_commits.render(commits=[commit_sql], **ctx_defaults)
+    assert "SQL Pendente" in html_commits_sql
+    assert "Não Salvo" not in html_commits_sql
+
+    html_commits_ambos = template_commits.render(commits=[commit_ambos], **ctx_defaults)
+    assert "Fluxo Pendente" in html_commits_ambos
+    assert "SQL Pendente" in html_commits_ambos
+    assert "Não Salvo" not in html_commits_ambos

@@ -1221,24 +1221,32 @@ function updateTableStatusCell(commit) {
     }
 
     cell.innerHTML = `<div class="d-flex flex-column gap-1 align-items-center">${fluxoHtml}${sqlHtml}</div>`;
-  } else if (commit.redmine_id) {
-    if (commit.has_sql_changes) {
-      cell.innerHTML = `<a href="https://redmine.tjce.jus.br/issues/${commit.redmine_id}" target="_blank" class="badge text-dark fw-bold text-decoration-none d-inline-flex align-items-center gap-1" style="background-color: #22d3ee;" title="Redmine de Scripts SQL (.sql)"><i class="bi bi-database-fill"></i> #${commit.redmine_id}</a>`;
-    } else if (commit.has_xml_changes) {
-      cell.innerHTML = `<a href="https://redmine.tjce.jus.br/issues/${commit.redmine_id}" target="_blank" class="badge bg-warning text-dark fw-bold text-decoration-none d-inline-flex align-items-center gap-1" title="Redmine de Fluxo (.xml)"><i class="bi bi-diagram-3-fill"></i> #${commit.redmine_id}</a>`;
+  } else if (commit.has_xml_changes) {
+    const rId = commit.redmine_id_fluxo || commit.redmine_id;
+    if (rId) {
+      cell.innerHTML = `<a href="https://redmine.tjce.jus.br/issues/${rId}" target="_blank" class="badge bg-warning text-dark fw-bold text-decoration-none d-inline-flex align-items-center gap-1" title="Redmine de Fluxo (.xml)"><i class="bi bi-diagram-3-fill"></i> #${rId}</a>`;
+    } else if (commit.is_saved_fluxo || commit.is_saved) {
+      cell.innerHTML = `<span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle d-inline-flex align-items-center gap-1" title="Fluxo salvo no PostgreSQL"><i class="bi bi-diagram-3 me-1"></i>Fluxo Salvo</span>`;
     } else {
-      cell.innerHTML = `<a href="https://redmine.tjce.jus.br/issues/${commit.redmine_id}" target="_blank" class="badge bg-success text-decoration-none d-inline-flex align-items-center gap-1" title="Abrir tarefa no Redmine"><i class="bi bi-check-circle-fill"></i> #${commit.redmine_id}</a>`;
+      cell.innerHTML = `<span class="badge bg-secondary-subtle text-muted border border-secondary-subtle d-inline-flex align-items-center gap-1" title="Fluxo pendente"><i class="bi bi-diagram-3 me-1"></i>Fluxo Pendente</span>`;
     }
-  } else if (commit.is_saved) {
-    if (commit.has_sql_changes) {
-      cell.innerHTML = `<span class="badge text-info border border-info-subtle d-inline-flex align-items-center gap-1" style="background-color: rgba(34, 211, 238, 0.15);" title="Item salvo no PostgreSQL"><i class="bi bi-database me-1"></i>Salvo</span>`;
-    } else if (commit.has_xml_changes) {
-      cell.innerHTML = `<span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle d-inline-flex align-items-center gap-1" title="Item salvo no PostgreSQL"><i class="bi bi-diagram-3 me-1"></i>Salvo</span>`;
+  } else if (commit.has_sql_changes) {
+    const rId = commit.redmine_id_sql || commit.redmine_id;
+    if (rId) {
+      cell.innerHTML = `<a href="https://redmine.tjce.jus.br/issues/${rId}" target="_blank" class="badge text-dark fw-bold text-decoration-none d-inline-flex align-items-center gap-1" style="background-color: #22d3ee;" title="Redmine de Scripts SQL (.sql)"><i class="bi bi-database-fill"></i> #${rId}</a>`;
+    } else if (commit.is_saved_sql || commit.is_saved) {
+      cell.innerHTML = `<span class="badge text-info border border-info-subtle d-inline-flex align-items-center gap-1" style="background-color: rgba(34, 211, 238, 0.15);" title="SQL salvo no PostgreSQL"><i class="bi bi-database me-1"></i>SQL Salvo</span>`;
     } else {
-      cell.innerHTML = `<span class="badge bg-success-subtle text-success border border-success-subtle" title="Item de Catálogo já salvo no PostgreSQL"><i class="bi bi-check-circle-fill me-1"></i>Salvo</span>`;
+      cell.innerHTML = `<span class="badge bg-secondary-subtle text-muted border border-secondary-subtle d-inline-flex align-items-center gap-1" title="SQL pendente"><i class="bi bi-database me-1"></i>SQL Pendente</span>`;
     }
   } else {
-    cell.innerHTML = `<span class="badge bg-secondary-subtle text-muted border border-secondary-subtle" title="Não salvo no banco de dados">Não Salvo</span>`;
+    if (commit.redmine_id) {
+      cell.innerHTML = `<a href="https://redmine.tjce.jus.br/issues/${commit.redmine_id}" target="_blank" class="badge bg-success text-decoration-none d-inline-flex align-items-center gap-1" title="Abrir tarefa no Redmine"><i class="bi bi-check-circle-fill"></i> #${commit.redmine_id}</a>`;
+    } else if (commit.is_saved) {
+      cell.innerHTML = `<span class="badge bg-success-subtle text-success border border-success-subtle" title="Item de Catálogo já salvo no PostgreSQL"><i class="bi bi-check-circle-fill me-1"></i>Salvo</span>`;
+    } else {
+      cell.innerHTML = `<span class="badge bg-secondary-subtle text-muted border border-secondary-subtle" title="Sem alterações de Fluxo ou SQL">Sem IC</span>`;
+    }
   }
 }
 
@@ -1808,24 +1816,32 @@ async function loadMoreCommits() {
             ? `<a href="https://redmine.tjce.jus.br/issues/${c.redmine_id_sql}" target="_blank" class="badge text-dark fw-bold text-decoration-none d-inline-flex align-items-center gap-1" style="background-color: #22d3ee;" title="Redmine de Scripts SQL (.sql)"><i class="bi bi-database-fill"></i> #${c.redmine_id_sql}</a>`
             : (c.is_saved_sql ? `<span class="badge text-info border border-info-subtle d-inline-flex align-items-center gap-1" style="background-color: rgba(34, 211, 238, 0.15);" title="SQL salvo no banco de dados"><i class="bi bi-database"></i> SQL Salvo</span>` : `<span class="badge bg-secondary-subtle text-muted border border-secondary-subtle d-inline-flex align-items-center gap-1" title="SQL pendente"><i class="bi bi-database"></i> SQL Pendente</span>`);
           statusHtml = `<div class="d-flex flex-column gap-1 align-items-center">${flx}${sql}</div>`;
-        } else if (c.redmine_id) {
-          if (c.has_sql_changes) {
-            statusHtml = `<a href="https://redmine.tjce.jus.br/issues/${c.redmine_id}" target="_blank" class="badge text-dark fw-bold text-decoration-none d-inline-flex align-items-center gap-1" style="background-color: #22d3ee;" title="Redmine de Scripts SQL (.sql)"><i class="bi bi-database-fill"></i> #${c.redmine_id}</a>`;
-          } else if (c.has_xml_changes) {
-            statusHtml = `<a href="https://redmine.tjce.jus.br/issues/${c.redmine_id}" target="_blank" class="badge bg-warning text-dark fw-bold text-decoration-none d-inline-flex align-items-center gap-1" title="Redmine de Fluxo (.xml)"><i class="bi bi-diagram-3-fill"></i> #${c.redmine_id}</a>`;
+        } else if (c.has_xml_changes) {
+          const rId = c.redmine_id_fluxo || c.redmine_id;
+          if (rId) {
+            statusHtml = `<a href="https://redmine.tjce.jus.br/issues/${rId}" target="_blank" class="badge bg-warning text-dark fw-bold text-decoration-none d-inline-flex align-items-center gap-1" title="Redmine de Fluxo (.xml)"><i class="bi bi-diagram-3-fill"></i> #${rId}</a>`;
+          } else if (c.is_saved_fluxo || c.is_saved) {
+            statusHtml = `<span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle d-inline-flex align-items-center gap-1" title="Fluxo salvo no PostgreSQL"><i class="bi bi-diagram-3 me-1"></i>Fluxo Salvo</span>`;
           } else {
-            statusHtml = `<a href="https://redmine.tjce.jus.br/issues/${c.redmine_id}" target="_blank" class="badge bg-success text-decoration-none d-inline-flex align-items-center gap-1" title="Abrir tarefa no Redmine"><i class="bi bi-check-circle-fill"></i> #${c.redmine_id}</a>`;
+            statusHtml = `<span class="badge bg-secondary-subtle text-muted border border-secondary-subtle d-inline-flex align-items-center gap-1" title="Fluxo pendente"><i class="bi bi-diagram-3 me-1"></i>Fluxo Pendente</span>`;
           }
-        } else if (c.is_saved) {
-          if (c.has_sql_changes) {
-            statusHtml = `<span class="badge text-info border border-info-subtle d-inline-flex align-items-center gap-1" style="background-color: rgba(34, 211, 238, 0.15);" title="Item salvo no PostgreSQL"><i class="bi bi-database me-1"></i>Salvo</span>`;
-          } else if (c.has_xml_changes) {
-            statusHtml = `<span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle d-inline-flex align-items-center gap-1" title="Item salvo no PostgreSQL"><i class="bi bi-diagram-3 me-1"></i>Salvo</span>`;
+        } else if (c.has_sql_changes) {
+          const rId = c.redmine_id_sql || c.redmine_id;
+          if (rId) {
+            statusHtml = `<a href="https://redmine.tjce.jus.br/issues/${rId}" target="_blank" class="badge text-dark fw-bold text-decoration-none d-inline-flex align-items-center gap-1" style="background-color: #22d3ee;" title="Redmine de Scripts SQL (.sql)"><i class="bi bi-database-fill"></i> #${rId}</a>`;
+          } else if (c.is_saved_sql || c.is_saved) {
+            statusHtml = `<span class="badge text-info border border-info-subtle d-inline-flex align-items-center gap-1" style="background-color: rgba(34, 211, 238, 0.15);" title="SQL salvo no PostgreSQL"><i class="bi bi-database me-1"></i>SQL Salvo</span>`;
           } else {
-            statusHtml = `<span class="badge bg-success-subtle text-success border border-success-subtle" title="Item de Catálogo já salvo no PostgreSQL"><i class="bi bi-check-circle-fill me-1"></i>Salvo</span>`;
+            statusHtml = `<span class="badge bg-secondary-subtle text-muted border border-secondary-subtle d-inline-flex align-items-center gap-1" title="SQL pendente"><i class="bi bi-database me-1"></i>SQL Pendente</span>`;
           }
         } else {
-          statusHtml = `<span class="badge bg-secondary-subtle text-muted border border-secondary-subtle" title="Não salvo no banco de dados">Não Salvo</span>`;
+          if (c.redmine_id) {
+            statusHtml = `<a href="https://redmine.tjce.jus.br/issues/${c.redmine_id}" target="_blank" class="badge bg-success text-decoration-none d-inline-flex align-items-center gap-1" title="Abrir tarefa no Redmine"><i class="bi bi-check-circle-fill"></i> #${c.redmine_id}</a>`;
+          } else if (c.is_saved) {
+            statusHtml = `<span class="badge bg-success-subtle text-success border border-success-subtle" title="Item de Catálogo já salvo no PostgreSQL"><i class="bi bi-check-circle-fill me-1"></i>Salvo</span>`;
+          } else {
+            statusHtml = `<span class="badge bg-secondary-subtle text-muted border border-secondary-subtle" title="Sem alterações de Fluxo ou SQL">Sem IC</span>`;
+          }
         }
 
         const actionHtml = `

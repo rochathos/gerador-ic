@@ -90,39 +90,40 @@ def enrich_commits_with_saved_items(commits: List[Any], saved_items: List[Catalo
         if isinstance(c, dict):
             c_hash = (c.get("hash") or "").strip().lower()
             c_short = (c.get("short_hash") or c_hash[:7]).strip().lower()
+            has_xml = c.get("has_xml_changes", False)
+            has_sql = c.get("has_sql_changes", False)
         else:
             c_hash = (getattr(c, "hash", "") or "").strip().lower()
             c_short = (getattr(c, "short_hash", "") or c_hash[:7]).strip().lower()
+            has_xml = getattr(c, "has_xml_changes", False)
+            has_sql = getattr(c, "has_sql_changes", False)
 
         raw_items = saved_map.get(c_hash) or saved_map.get(c_short) or []
         items_dict = {i.id: i for i in raw_items}
         items = list(items_dict.values())
 
-        # Prioritize items with non-empty redmine_id
+        # Priorizar itens de fluxo (natureza == 'fluxo')
         it_fluxo = (
             next((i for i in items if (i.natureza or "").lower() == "fluxo" and i.redmine_id), None)
             or next((i for i in items if (i.natureza or "").lower() == "fluxo"), None)
         )
+        # Priorizar itens de sql (natureza == 'sql')
         it_sql = (
             next((i for i in items if (i.natureza or "").lower() == "sql" and i.redmine_id), None)
             or next((i for i in items if (i.natureza or "").lower() == "sql"), None)
         )
 
-        if not it_fluxo and items:
-            it_fluxo = (
-                next((i for i in items if i != it_sql and i.redmine_id), None)
-                or next((i for i in items if i != it_sql), None)
-                or items[0]
-            )
+        # Tratar itens legados sem natureza explicitamente definida
+        for it in items:
+            nat = (it.natureza or "").lower()
+            if nat not in ("fluxo", "sql"):
+                if has_sql and not has_xml and not it_sql:
+                    it_sql = it
+                elif not it_fluxo:
+                    it_fluxo = it
 
         r_fluxo = it_fluxo.redmine_id if it_fluxo else None
         r_sql = it_sql.redmine_id if it_sql else None
-
-        if not r_fluxo:
-            other_with_redmine = next((i for i in items if i != it_sql and i.redmine_id), None)
-            if other_with_redmine:
-                it_fluxo = other_with_redmine
-                r_fluxo = it_fluxo.redmine_id
 
         is_saved = len(items) > 0
         is_saved_fluxo = (it_fluxo is not None)
