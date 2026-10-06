@@ -806,6 +806,22 @@ function renderXmlTagsDetail(commit, tagsAlert, countText, tagsDetail) {
 }
 
 /**
+ * Verifica se uma determinada natureza de IC já possui Redmine emitido para o commit
+ * @param {Object} commit - Objeto do commit
+ * @param {string} natureza - 'fluxo' | 'sql'
+ * @returns {boolean}
+ */
+function verificarSeNaturezaJaCriada(commit, natureza) {
+  if (!commit) return false;
+  const ehSql = (natureza || '').toLowerCase() === 'sql';
+  const temAmbos = commit.tem_ambos_ajustes || (commit.has_xml_changes && commit.has_sql_changes);
+  if (ehSql) {
+    return Boolean(commit.redmine_id_sql);
+  }
+  return Boolean(commit.redmine_id_fluxo || (!temAmbos && commit.redmine_id));
+}
+
+/**
  * Render the modal contents dynamically according to window.currentICNature ('fluxo' vs 'sql')
  */
 function renderModalForCurrentNature() {
@@ -863,48 +879,48 @@ function renderModalForCurrentNature() {
     }
   }
 
-  // Determine Redmine ID for this nature
+  // Determine Redmine ID for this active nature
+  const hasXml = commit.has_xml_changes || commit.xml_files_count > 0;
+  const hasSql = commit.has_sql_changes || commit.sql_files_count > 0;
+  const hasBoth = commit.tem_ambos_ajustes || (hasXml && hasSql);
+
   let currentRedmineId = isSql ? commit.redmine_id_sql : commit.redmine_id_fluxo;
-  if (!currentRedmineId && !commit.tem_ambos_ajustes) {
+  if (!currentRedmineId && !hasBoth) {
     currentRedmineId = commit.redmine_id;
   }
   if (redmineIdEl) redmineIdEl.value = currentRedmineId || "";
 
-  const hasXml = commit.has_xml_changes || commit.xml_files_count > 0;
-  const hasSql = commit.has_sql_changes || commit.sql_files_count > 0;
-  const hasBoth = commit.tem_ambos_ajustes || (hasXml && hasSql);
-  const bothCreated = hasBoth && commit.redmine_id_fluxo && commit.redmine_id_sql;
-  const singleCreated = !hasBoth && (commit.redmine_id || (isSql ? commit.redmine_id_sql : commit.redmine_id_fluxo));
+  const isCurrentNatureCreated = verificarSeNaturezaJaCriada(commit, isSql ? 'sql' : 'fluxo');
 
-  // Redmine button state: always a single unified button
+  // Redmine button state: adapts to the active tab (Fluxo vs SQL)
   if (redmineBtn) {
-    if (bothCreated) {
+    if (isCurrentNatureCreated) {
       redmineBtn.className = "btn btn-success d-flex align-items-center gap-1";
       redmineBtn.style.backgroundColor = "";
-      redmineBtn.innerHTML = `<i class="bi bi-box-arrow-up-right"></i> Redmines #${commit.redmine_id_fluxo} e #${commit.redmine_id_sql}`;
+      redmineBtn.innerHTML = `<i class="bi bi-box-arrow-up-right"></i> Redmine #${currentRedmineId}`;
       redmineBtn.disabled = false;
-      redmineBtn.onclick = () => window.open(`https://redmine.tjce.jus.br/issues/${commit.redmine_id_fluxo}`, '_blank');
-    } else if (singleCreated) {
-      const singleId = commit.redmine_id || (isSql ? commit.redmine_id_sql : commit.redmine_id_fluxo);
-      redmineBtn.className = "btn btn-success d-flex align-items-center gap-1";
-      redmineBtn.style.backgroundColor = "";
-      redmineBtn.innerHTML = `<i class="bi bi-box-arrow-up-right"></i> Redmine #${singleId}`;
-      redmineBtn.disabled = false;
-      redmineBtn.onclick = () => window.open(`https://redmine.tjce.jus.br/issues/${singleId}`, '_blank');
+      redmineBtn.onclick = () => window.open(`https://redmine.tjce.jus.br/issues/${currentRedmineId}`, '_blank');
     } else {
       redmineBtn.className = "btn btn-warning text-dark fw-bold d-flex align-items-center gap-1";
       redmineBtn.style.backgroundColor = "";
       redmineBtn.innerHTML = '<i class="bi bi-cloud-arrow-up-fill"></i> Criar no Redmine';
       redmineBtn.disabled = false;
-      redmineBtn.onclick = function() { createICDirectlyInRedmine(this, false); };
+      redmineBtn.onclick = function() { criarItemCatalogoNoRedmine(this, false); };
     }
   }
 
-  // Simulation button label: always a single unified button
+  // Simulation button: only visible/enabled if current nature is NOT created yet
   if (simBtn) {
-    simBtn.disabled = false;
-    simBtn.className = "btn btn-outline-warning d-flex align-items-center gap-1";
-    simBtn.innerHTML = '<i class="bi bi-shield-check"></i> Testar no Redmine (Simulação)';
+    if (isCurrentNatureCreated) {
+      simBtn.classList.add("d-none");
+      simBtn.disabled = true;
+    } else {
+      simBtn.classList.remove("d-none");
+      simBtn.disabled = false;
+      simBtn.className = "btn btn-outline-warning d-flex align-items-center gap-1";
+      simBtn.innerHTML = '<i class="bi bi-shield-check"></i> Testar no Redmine (Simulação)';
+      simBtn.onclick = function() { criarItemCatalogoNoRedmine(this, true); };
+    }
   }
 
   // Quantity and Description for this nature
@@ -1257,51 +1273,68 @@ function onICInputChanged() {
 
 
 /**
- * Create IC directly in Redmine via official REST API with live step-by-step logs
+ * Cria ou simula o Item de Catálogo diretamente no Redmine via API oficial
+ * @param {HTMLElement} elementoBotao - Elemento HTML do botão acionado
+ * @param {boolean} ehSimulacao - Se verdadeiro, executa validação em modo dry-run sem gerar tarefa real
  */
-async function createICDirectlyInRedmine(btn, isDryRun = false) {
-  const titleEl = document.getElementById("icInputTitle");
-  const descEl = document.getElementById("icInputDesc");
-  const alertEl = document.getElementById("icFeedbackAlert");
-  const alertText = document.getElementById("icFeedbackText");
-  const logsCont = document.getElementById("icRedmineLogsContainer");
-  const logsList = document.getElementById("icRedmineLogsList");
-  const logsStatus = document.getElementById("icRedmineLogsStatus");
+async function criarItemCatalogoNoRedmine(elementoBotao, ehSimulacao = false) {
+  const elementoTitulo = document.getElementById("icInputTitle");
+  const elementoDescricao = document.getElementById("icInputDesc");
+  const elementoAlerta = document.getElementById("icFeedbackAlert");
+  const elementoAlertaTexto = document.getElementById("icFeedbackText");
+  const containerLogs = document.getElementById("icRedmineLogsContainer");
+  const listaLogs = document.getElementById("icRedmineLogsList");
+  const statusLogs = document.getElementById("icRedmineLogsStatus");
 
-  const title = titleEl ? titleEl.value.trim() : "";
-  const description = descEl ? descEl.value.trim() : "";
+  const titulo = elementoTitulo ? elementoTitulo.value.trim() : "";
+  const descricao = elementoDescricao ? elementoDescricao.value.trim() : "";
 
-  if (!title) {
-    if (alertEl && alertText) {
-      alertEl.classList.remove("d-none", "alert-success");
-      alertEl.classList.add("alert-danger");
-      alertText.textContent = "Por favor, informe o título do Item de Catálogo.";
+  if (!titulo) {
+    if (elementoAlerta && elementoAlertaTexto) {
+      elementoAlerta.classList.remove("d-none", "alert-success");
+      elementoAlerta.classList.add("alert-danger");
+      elementoAlertaTexto.textContent = "Por favor, informe o título do Item de Catálogo.";
     }
     return;
   }
 
-  if (logsCont) logsCont.classList.remove("d-none");
-  if (logsList) logsList.innerHTML = "";
-  if (logsStatus) {
-    logsStatus.className = "badge bg-warning text-dark";
-    logsStatus.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span> Executando';
+  // Proteção contextual: Se a natureza da aba ativa já foi criada, não permite reenvio
+  const naturezaAtiva = window.currentICNature || 'fluxo';
+  if (verificarSeNaturezaJaCriada(currentModalCommit, naturezaAtiva)) {
+    const idExistente = naturezaAtiva === 'sql' 
+      ? currentModalCommit.redmine_id_sql 
+      : (currentModalCommit.redmine_id_fluxo || currentModalCommit.redmine_id);
+    if (elementoAlerta && elementoAlertaTexto) {
+      elementoAlerta.classList.remove("d-none", "alert-danger");
+      elementoAlerta.classList.add("alert-warning");
+      elementoAlertaTexto.textContent = `A tarefa desta natureza (${naturezaAtiva.toUpperCase()}) já foi criada anteriormente: #${idExistente}.`;
+    }
+    renderModalForCurrentNature();
+    return;
   }
 
-  const appendLog = (msg, isError = false) => {
-    if (!logsList) return;
+  if (containerLogs) containerLogs.classList.remove("d-none");
+  if (listaLogs) listaLogs.innerHTML = "";
+  if (statusLogs) {
+    statusLogs.className = "badge bg-warning text-dark";
+    statusLogs.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span> Executando';
+  }
+
+  const adicionarLog = (mensagem, ehErro = false) => {
+    if (!listaLogs) return;
     const div = document.createElement("div");
-    div.className = isError ? "text-danger" : "text-light";
-    div.innerHTML = `<span class="${isError ? 'text-danger' : 'text-success'} me-1">${isError ? '✖' : '✔'}</span> ${escapeHtml(msg)}`;
-    logsList.appendChild(div);
-    if (logsCont) logsCont.scrollTop = logsCont.scrollHeight;
+    div.className = ehErro ? "text-danger" : "text-light";
+    div.innerHTML = `<span class="${ehErro ? 'text-danger' : 'text-success'} me-1">${ehErro ? '✖' : '✔'}</span> ${escapeHtml(mensagem)}`;
+    listaLogs.appendChild(div);
+    if (containerLogs) containerLogs.scrollTop = containerLogs.scrollHeight;
   };
 
-  appendLog(`Iniciando processo de ${isDryRun ? 'SIMULAÇÃO (DRY-RUN)' : 'CRIAÇÃO'} via API do Redmine...`);
+  adicionarLog(`Iniciando processo de ${ehSimulacao ? 'SIMULAÇÃO (DRY-RUN)' : 'CRIAÇÃO'} via API do Redmine...`);
 
-  const originalBtnHtml = btn ? btn.innerHTML : "";
-  if (btn) {
-    btn.disabled = true;
-    btn.innerHTML = isDryRun 
+  const htmlBotaoOriginal = elementoBotao ? elementoBotao.innerHTML : "";
+  if (elementoBotao) {
+    elementoBotao.disabled = true;
+    elementoBotao.innerHTML = ehSimulacao 
       ? '<span class="spinner-border spinner-border-sm me-1" role="status"></span> Validando no Redmine...'
       : '<span class="spinner-border spinner-border-sm me-1" role="status"></span> Criando no Redmine...';
   }
@@ -1309,56 +1342,51 @@ async function createICDirectlyInRedmine(btn, isDryRun = false) {
   const commitHash = currentModalCommit ? (currentModalCommit.hash || currentModalCommit.short_hash || "") : "";
   const commitUrl = currentModalCommit ? (currentModalCommit.commit_url || currentModalCommit.web_commit_url || "") : "";
   const complexityEl = document.getElementById("icInputComplexity");
-  const complexity = complexityEl ? complexityEl.value : (currentModalCommit && currentModalCommit.complexity ? currentModalCommit.complexity : "Baixa");
+  const complexidade = complexityEl ? complexityEl.value : (currentModalCommit && currentModalCommit.complexity ? currentModalCommit.complexity : "Baixa");
 
-  const hasXml = currentModalCommit ? (currentModalCommit.has_xml_changes || currentModalCommit.xml_files_count > 0) : false;
-  const hasSql = currentModalCommit ? (currentModalCommit.has_sql_changes || currentModalCommit.sql_files_count > 0) : false;
-  const hasBoth = currentModalCommit && (currentModalCommit.tem_ambos_ajustes || (hasXml && hasSql));
+  const temXml = currentModalCommit ? (currentModalCommit.has_xml_changes || currentModalCommit.xml_files_count > 0) : false;
+  const temSql = currentModalCommit ? (currentModalCommit.has_sql_changes || currentModalCommit.sql_files_count > 0) : false;
+  const temAmbos = currentModalCommit && (currentModalCommit.tem_ambos_ajustes || (temXml && temSql));
 
-  // CASO COMMIT MISTO (XML + SQL): Um único clique cria/simula AMBOS os Redmines automaticamente
-  if (hasBoth) {
+  // CASO COMMIT MISTO (XML + SQL)
+  if (temAmbos) {
     try {
-      const needFluxo = !currentModalCommit.redmine_id_fluxo;
-      const needSql = !currentModalCommit.redmine_id_sql;
+      const precisaFluxo = !currentModalCommit.redmine_id_fluxo;
+      const precisaSql = !currentModalCommit.redmine_id_sql;
 
-      if (!needFluxo && !needSql) {
-        appendLog(`Ambas as tarefas já foram criadas: #${currentModalCommit.redmine_id_fluxo} (Fluxo) e #${currentModalCommit.redmine_id_sql} (SQL)`);
-        if (btn) {
-          btn.disabled = false;
-          btn.className = "btn btn-success d-flex align-items-center gap-1";
-          btn.innerHTML = `<i class="bi bi-box-arrow-up-right"></i> Redmines #${currentModalCommit.redmine_id_fluxo} e #${currentModalCommit.redmine_id_sql}`;
-          btn.onclick = () => window.open(`https://redmine.tjce.jus.br/issues/${currentModalCommit.redmine_id_fluxo}`, '_blank');
-        }
+      if (!precisaFluxo && !precisaSql) {
+        adicionarLog(`Ambas as tarefas já foram criadas: #${currentModalCommit.redmine_id_fluxo} (Fluxo) e #${currentModalCommit.redmine_id_sql} (SQL)`);
+        renderModalForCurrentNature();
         return;
       }
 
       let fluxoIssueId = currentModalCommit.redmine_id_fluxo || null;
       let sqlIssueId = currentModalCommit.redmine_id_sql || null;
 
-      // 1. Processar Redmine Fluxo (XML)
-      if (needFluxo) {
-        appendLog("[1/2] Processando Redmine de Catálogo da Funcionalidade (Fluxo XML)...");
-        const descFluxo = currentModalCommit._edited_desc_fluxo || (window.currentICNature === 'fluxo' ? description : currentModalCommit.ic_description_fluxo) || description;
+      // 1. Processar Redmine Fluxo (XML) apenas se pendente
+      if (precisaFluxo) {
+        adicionarLog("[Fluxo XML] Processando Redmine de Catálogo da Funcionalidade...");
+        const descFluxo = currentModalCommit._edited_desc_fluxo || (naturezaAtiva === 'fluxo' ? descricao : currentModalCommit.ic_description_fluxo) || descricao;
         const countFluxo = currentModalCommit.ic_count_xml !== undefined ? currentModalCommit.ic_count_xml : (currentModalCommit.ic_count || 1);
 
         const resFluxo = await fetch("/api/redmine/create-ic", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            title: title,
+            title: titulo,
             description: descFluxo,
             commit_hash: commitHash,
             commit_url: commitUrl,
             ic_count: countFluxo,
             natureza: "fluxo",
             activity_type: "Desenvolvimento - Criar/Manter tarefa de automação",
-            complexity: complexity,
-            dry_run: isDryRun,
+            complexity: complexidade,
+            dry_run: ehSimulacao,
           }),
         });
         const dataFluxo = await resFluxo.json();
         if (Array.isArray(dataFluxo.logs)) {
-          dataFluxo.logs.forEach(msg => appendLog(`[Fluxo] ${msg}`, msg.includes("FALHA") || msg.includes("Erro")));
+          dataFluxo.logs.forEach(msg => adicionarLog(`[Fluxo] ${msg}`, msg.includes("FALHA") || msg.includes("Erro")));
         }
         if (!dataFluxo.success) {
           throw new Error(dataFluxo.message || "Falha ao criar Redmine de Fluxo.");
@@ -1366,35 +1394,35 @@ async function createICDirectlyInRedmine(btn, isDryRun = false) {
         fluxoIssueId = dataFluxo.issue_id;
         currentModalCommit.redmine_id_fluxo = fluxoIssueId;
         currentModalCommit.is_saved_fluxo = true;
-        appendLog(`[Fluxo XML] Tarefa #${fluxoIssueId} processada com sucesso!`);
+        adicionarLog(`[Fluxo XML] Tarefa #${fluxoIssueId} processada com sucesso!`);
       } else {
-        appendLog(`[Fluxo XML] Já emitido anteriormente: #${fluxoIssueId}`);
+        adicionarLog(`[Fluxo XML] Já emitido anteriormente: #${fluxoIssueId} (mantido).`);
       }
 
-      // 2. Processar Redmine SQL (Scripts)
-      if (needSql) {
-        appendLog("[2/2] Processando Redmine de Banco de Dados (Scripts SQL)...");
-        const descSql = currentModalCommit._edited_desc_sql || (window.currentICNature === 'sql' ? description : currentModalCommit.ic_description_sql) || description;
+      // 2. Processar Redmine SQL (Scripts) apenas se pendente
+      if (precisaSql) {
+        adicionarLog("[Scripts SQL] Processando Redmine de Banco de Dados...");
+        const descSql = currentModalCommit._edited_desc_sql || (naturezaAtiva === 'sql' ? descricao : currentModalCommit.ic_description_sql) || descricao;
         const countSql = currentModalCommit.ic_count_sql !== undefined ? currentModalCommit.ic_count_sql : (currentModalCommit.has_sql_changes ? 1 : 1);
 
         const resSql = await fetch("/api/redmine/create-ic", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            title: title,
+            title: titulo,
             description: descSql,
             commit_hash: commitHash,
             commit_url: commitUrl,
             ic_count: countSql,
             natureza: "sql",
             activity_type: "Desenvolvimento - Criar/Manter scripts para extração de dados do banco de dados",
-            complexity: complexity,
-            dry_run: isDryRun,
+            complexity: complexidade,
+            dry_run: ehSimulacao,
           }),
         });
         const dataSql = await resSql.json();
         if (Array.isArray(dataSql.logs)) {
-          dataSql.logs.forEach(msg => appendLog(`[SQL] ${msg}`, msg.includes("FALHA") || msg.includes("Erro")));
+          dataSql.logs.forEach(msg => adicionarLog(`[SQL] ${msg}`, msg.includes("FALHA") || msg.includes("Erro")));
         }
         if (!dataSql.success) {
           throw new Error(dataSql.message || "Falha ao criar Redmine de Banco de Dados.");
@@ -1402,12 +1430,12 @@ async function createICDirectlyInRedmine(btn, isDryRun = false) {
         sqlIssueId = dataSql.issue_id;
         currentModalCommit.redmine_id_sql = sqlIssueId;
         currentModalCommit.is_saved_sql = true;
-        appendLog(`[Scripts SQL] Tarefa #${sqlIssueId} processada com sucesso!`);
+        adicionarLog(`[Scripts SQL] Tarefa #${sqlIssueId} processada com sucesso!`);
       } else {
-        appendLog(`[Scripts SQL] Já emitido anteriormente: #${sqlIssueId}`);
+        adicionarLog(`[Scripts SQL] Já emitido anteriormente: #${sqlIssueId} (mantido).`);
       }
 
-      // Atualizar commit e storage
+      // Atualizar commit e armazenamento global
       currentModalCommit.is_saved = true;
       currentModalCommit.redmine_id = fluxoIssueId || sqlIssueId;
 
@@ -1425,63 +1453,93 @@ async function createICDirectlyInRedmine(btn, isDryRun = false) {
       renderModalForCurrentNature();
       updateTableStatusCell(currentModalCommit);
 
-      if (logsStatus) {
-        logsStatus.className = isDryRun ? "badge bg-info text-dark" : "badge bg-success";
-        logsStatus.textContent = isDryRun ? "Simulação Concluída (2 Tarefas)" : "Concluído (2 Tarefas)";
+      if (statusLogs) {
+        statusLogs.className = ehSimulacao ? "badge bg-info text-dark" : "badge bg-success";
+        if (precisaFluxo && precisaSql) {
+          statusLogs.textContent = ehSimulacao ? "Simulação Concluída (2 Tarefas)" : "Concluído (2 Tarefas)";
+        } else if (precisaSql) {
+          statusLogs.textContent = ehSimulacao ? "Simulação Concluída (SQL)" : "Concluído (SQL)";
+        } else {
+          statusLogs.textContent = ehSimulacao ? "Simulação Concluída (Fluxo)" : "Concluído (Fluxo)";
+        }
       }
 
-      if (btn) {
-        btn.disabled = false;
-        btn.className = "btn btn-success d-flex align-items-center gap-1";
-        btn.innerHTML = `<i class="bi bi-box-arrow-up-right"></i> Redmines #${fluxoIssueId} e #${sqlIssueId}`;
-        btn.onclick = () => window.open(`https://redmine.tjce.jus.br/issues/${fluxoIssueId}`, '_blank');
+      if (elementoBotao) {
+        elementoBotao.disabled = false;
       }
+      renderModalForCurrentNature();
 
-      if (alertEl && alertText) {
-        alertEl.classList.remove("d-none", "alert-danger");
-        alertEl.classList.add("alert-success");
+      if (elementoAlerta && elementoAlertaTexto) {
+        elementoAlerta.classList.remove("d-none", "alert-danger");
+        elementoAlerta.classList.add("alert-success");
         const urlFluxo = `https://redmine.tjce.jus.br/issues/${fluxoIssueId}`;
         const urlSql = `https://redmine.tjce.jus.br/issues/${sqlIssueId}`;
-        alertText.innerHTML = isDryRun ? `
-          <span><i class="bi bi-check-circle-fill text-success me-1"></i><b>Simulação Dupla Concluída com Sucesso!</b> 2 tarefas simuladas e salvas no banco: <b>#${fluxoIssueId} (Fluxo)</b> e <b>#${sqlIssueId} (SQL)</b>.</span>
-        ` : `
-          <span><b>Sucesso!</b> Ambas as tarefas criadas no Redmine e salvas no banco de dados!</span>
-          <a href="${urlFluxo}" target="_blank" class="btn btn-sm btn-outline-success ms-2 py-0 px-2 text-decoration-none">
-            #${fluxoIssueId} Fluxo <i class="bi bi-box-arrow-up-right ms-1"></i>
-          </a>
-          <a href="${urlSql}" target="_blank" class="btn btn-sm btn-outline-info ms-2 py-0 px-2 text-decoration-none">
-            #${sqlIssueId} SQL <i class="bi bi-box-arrow-up-right ms-1"></i>
-          </a>
-        `;
+
+        if (ehSimulacao) {
+          if (!precisaFluxo && precisaSql) {
+            elementoAlertaTexto.innerHTML = `<span><i class="bi bi-check-circle-fill text-success me-1"></i><b>Simulação (SQL) Concluída!</b> Tarefa simulada: <b>#${sqlIssueId} (SQL)</b>. Fluxo <b>#${fluxoIssueId}</b> mantido.</span>`;
+          } else if (precisaFluxo && !precisaSql) {
+            elementoAlertaTexto.innerHTML = `<span><i class="bi bi-check-circle-fill text-success me-1"></i><b>Simulação (Fluxo) Concluída!</b> Tarefa simulada: <b>#${fluxoIssueId} (Fluxo)</b>.</span>`;
+          } else {
+            elementoAlertaTexto.innerHTML = `<span><i class="bi bi-check-circle-fill text-success me-1"></i><b>Simulação Dupla Concluída com Sucesso!</b> 2 tarefas simuladas e salvas no banco: <b>#${fluxoIssueId} (Fluxo)</b> e <b>#${sqlIssueId} (SQL)</b>.</span>`;
+          }
+        } else {
+          if (!precisaFluxo && precisaSql) {
+            elementoAlertaTexto.innerHTML = `
+              <span><b>Sucesso!</b> Tarefa de Banco de Dados criada no Redmine (#${sqlIssueId}) e salva no banco!</span>
+              <a href="${urlSql}" target="_blank" class="btn btn-sm btn-outline-info ms-2 py-0 px-2 text-decoration-none">
+                #${sqlIssueId} SQL <i class="bi bi-box-arrow-up-right ms-1"></i>
+              </a>
+              <span class="text-muted ms-2 small">(Fluxo: <a href="${urlFluxo}" target="_blank" class="text-warning text-decoration-none">#${fluxoIssueId}</a>)</span>
+            `;
+          } else if (precisaFluxo && !precisaSql) {
+            elementoAlertaTexto.innerHTML = `
+              <span><b>Sucesso!</b> Tarefa de Catálogo criada no Redmine (#${fluxoIssueId}) e salva no banco!</span>
+              <a href="${urlFluxo}" target="_blank" class="btn btn-sm btn-outline-success ms-2 py-0 px-2 text-decoration-none">
+                #${fluxoIssueId} Fluxo <i class="bi bi-box-arrow-up-right ms-1"></i>
+              </a>
+            `;
+          } else {
+            elementoAlertaTexto.innerHTML = `
+              <span><b>Sucesso!</b> Ambas as tarefas criadas no Redmine e salvas no banco de dados!</span>
+              <a href="${urlFluxo}" target="_blank" class="btn btn-sm btn-outline-success ms-2 py-0 px-2 text-decoration-none">
+                #${fluxoIssueId} Fluxo <i class="bi bi-box-arrow-up-right ms-1"></i>
+              </a>
+              <a href="${urlSql}" target="_blank" class="btn btn-sm btn-outline-info ms-2 py-0 px-2 text-decoration-none">
+                #${sqlIssueId} SQL <i class="bi bi-box-arrow-up-right ms-1"></i>
+              </a>
+            `;
+          }
+        }
       }
     } catch (err) {
       console.error("Erro no processo duplo:", err);
-      appendLog(`Erro: ${err.message}`, true);
-      if (logsStatus) {
-        logsStatus.className = "badge bg-danger";
-        logsStatus.textContent = "Erro";
+      adicionarLog(`Erro: ${err.message}`, true);
+      if (statusLogs) {
+        statusLogs.className = "badge bg-danger";
+        statusLogs.textContent = "Erro";
       }
-      if (btn) {
-        btn.disabled = false;
-        btn.innerHTML = originalBtnHtml || '<i class="bi bi-cloud-arrow-up-fill"></i> Tentar Novamente';
+      if (elementoBotao) {
+        elementoBotao.disabled = false;
+        elementoBotao.innerHTML = htmlBotaoOriginal || '<i class="bi bi-cloud-arrow-up-fill"></i> Tentar Novamente';
       }
-      if (alertEl && alertText) {
-        alertEl.classList.remove("d-none", "alert-success");
-        alertEl.classList.add("alert-danger");
-        alertText.textContent = `Erro no processo: ${err.message}`;
+      if (elementoAlerta && elementoAlertaTexto) {
+        elementoAlerta.classList.remove("d-none", "alert-success");
+        elementoAlerta.classList.add("alert-danger");
+        elementoAlertaTexto.textContent = `Erro no processo: ${err.message}`;
       }
     }
     return;
   }
 
   // CASO COMMIT DE NATUREZA ÚNICA (Apenas XML ou Apenas SQL)
-  const isOnlySql = hasSql && !hasXml;
-  const natureza = isOnlySql ? "sql" : "fluxo";
-  const defaultAct = isOnlySql
+  const ehApenasSql = temSql && !temXml;
+  const natureza = ehApenasSql ? "sql" : "fluxo";
+  const atividadePadrao = ehApenasSql
     ? "Desenvolvimento - Criar/Manter scripts para extração de dados do banco de dados"
     : "Desenvolvimento - Criar/Manter tarefa de automação";
   const inputActivity = document.getElementById("icInputActivityType");
-  const activityType = inputActivity ? inputActivity.value : defaultAct;
+  const activityType = inputActivity ? inputActivity.value : atividadePadrao;
 
   const quantityEl = document.getElementById("icInputQuantity");
   let icCount = quantityEl ? parseInt(quantityEl.value, 10) : (currentModalCommit ? (currentModalCommit.ic_count || 1) : 1);
@@ -1494,24 +1552,24 @@ async function createICDirectlyInRedmine(btn, isDryRun = false) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        title: title,
-        description: description,
+        title: titulo,
+        description: descricao,
         commit_hash: commitHash,
         commit_url: commitUrl,
         ic_count: icCount,
         natureza: natureza,
         activity_type: activityType,
-        complexity: complexity,
-        dry_run: isDryRun,
+        complexity: complexidade,
+        dry_run: ehSimulacao,
       }),
     });
 
     const data = await res.json();
 
-    if (logsList) logsList.innerHTML = "";
+    if (listaLogs) listaLogs.innerHTML = "";
     if (Array.isArray(data.logs)) {
       data.logs.forEach((stepMsg) => {
-        appendLog(stepMsg, stepMsg.includes("FALHA") || stepMsg.includes("Erro"));
+        adicionarLog(stepMsg, stepMsg.includes("FALHA") || stepMsg.includes("Erro"));
       });
     }
 
@@ -1519,7 +1577,6 @@ async function createICDirectlyInRedmine(btn, isDryRun = false) {
       const issueId = data.issue_id;
       const issueUrl = data.issue_url || `https://redmine.tjce.jus.br/issues/${issueId}`;
 
-      // Set Redmine ID and link for both simulation and real creation
       const redmineIdEl = document.getElementById("icInputRedmineId");
       if (redmineIdEl && issueId) {
         redmineIdEl.value = issueId;
@@ -1530,7 +1587,6 @@ async function createICDirectlyInRedmine(btn, isDryRun = false) {
         redmineLinkEl.classList.remove("d-none");
       }
 
-      // Update currentModalCommit state per nature
       if (currentModalCommit) {
         if (natureza === 'sql') {
           currentModalCommit.redmine_id_sql = issueId;
@@ -1556,47 +1612,41 @@ async function createICDirectlyInRedmine(btn, isDryRun = false) {
         }
       }
 
-      // Update tab badges inside modal, re-render current nature, and update table status
       updateNatureTabBadges(currentModalCommit);
       renderModalForCurrentNature();
       updateTableStatusCell(currentModalCommit);
 
       if (data.dry_run) {
-        if (logsStatus) {
-          logsStatus.className = "badge bg-info text-dark";
-          logsStatus.textContent = "Simulação Aprovada & Salva";
+        if (statusLogs) {
+          statusLogs.className = "badge bg-info text-dark";
+          statusLogs.textContent = "Simulação Aprovada & Salva";
         }
-
-        if (btn) {
-          btn.disabled = false;
-          btn.className = "btn btn-outline-success d-flex align-items-center gap-1";
-          btn.innerHTML = `<i class="bi bi-check2-circle"></i> Simulado (${natureza.toUpperCase()} #${issueId})`;
+        if (elementoBotao) {
+          elementoBotao.disabled = false;
         }
+        renderModalForCurrentNature();
 
-        if (alertEl && alertText) {
-          alertEl.classList.remove("d-none", "alert-danger");
-          alertEl.classList.add("alert-success");
-          alertText.innerHTML = `
+        if (elementoAlerta && elementoAlertaTexto) {
+          elementoAlerta.classList.remove("d-none", "alert-danger");
+          elementoAlerta.classList.add("alert-success");
+          elementoAlertaTexto.innerHTML = `
             <span><i class="bi bi-check-circle-fill text-success me-1"></i><b>Simulação (${natureza.toUpperCase()}) Concluída e Salva no Banco!</b> Tarefa simulada <b>#${issueId}</b> registrada no banco de dados com status <i>criado</i> (nenhuma tarefa real foi criada no Redmine).</span>
           `;
         }
       } else {
-        if (logsStatus) {
-          logsStatus.className = "badge bg-success";
-          logsStatus.textContent = "Concluído";
+        if (statusLogs) {
+          statusLogs.className = "badge bg-success";
+          statusLogs.textContent = "Concluído";
         }
-
-        if (btn) {
-          btn.disabled = false;
-          btn.className = "btn btn-success d-flex align-items-center gap-1";
-          btn.innerHTML = `<i class="bi bi-box-arrow-up-right"></i> Redmine #${issueId}`;
-          btn.onclick = () => window.open(issueUrl, '_blank');
+        if (elementoBotao) {
+          elementoBotao.disabled = false;
         }
+        renderModalForCurrentNature();
 
-        if (alertEl && alertText) {
-          alertEl.classList.remove("d-none", "alert-danger");
-          alertEl.classList.add("alert-success");
-          alertText.innerHTML = `
+        if (elementoAlerta && elementoAlertaTexto) {
+          elementoAlerta.classList.remove("d-none", "alert-danger");
+          elementoAlerta.classList.add("alert-success");
+          elementoAlertaTexto.innerHTML = `
             <span><b>Sucesso!</b> Tarefa (${natureza.toUpperCase()}) <b>#${issueId}</b> criada no Redmine e salva no banco de dados!</span>
             <a href="${issueUrl}" target="_blank" class="btn btn-sm btn-outline-success ms-2 py-0 px-2 text-decoration-none">
               Abrir Tarefa <i class="bi bi-box-arrow-up-right ms-1"></i>
@@ -1605,38 +1655,41 @@ async function createICDirectlyInRedmine(btn, isDryRun = false) {
         }
       }
     } else {
-      if (logsStatus) {
-        logsStatus.className = "badge bg-danger";
-        logsStatus.textContent = "Erro";
+      if (statusLogs) {
+        statusLogs.className = "badge bg-danger";
+        statusLogs.textContent = "Erro";
       }
-      if (btn) {
-        btn.disabled = false;
-        btn.innerHTML = originalBtnHtml || '<i class="bi bi-cloud-arrow-up-fill"></i> Tentar Novamente';
+      if (elementoBotao) {
+        elementoBotao.disabled = false;
+        elementoBotao.innerHTML = htmlBotaoOriginal || '<i class="bi bi-cloud-arrow-up-fill"></i> Tentar Novamente';
       }
-      if (alertEl && alertText) {
-        alertEl.classList.remove("d-none", "alert-success");
-        alertEl.classList.add("alert-danger");
-        alertText.textContent = `Erro no processo: ${data.message}`;
+      if (elementoAlerta && elementoAlertaTexto) {
+        elementoAlerta.classList.remove("d-none", "alert-success");
+        elementoAlerta.classList.add("alert-danger");
+        elementoAlertaTexto.textContent = `Erro no processo: ${data.message}`;
       }
     }
   } catch (err) {
     console.error("Erro na requisição /api/redmine/create-ic:", err);
-    appendLog(`Erro de conexão local: ${err.message}`, true);
-    if (logsStatus) {
-      logsStatus.className = "badge bg-danger";
-      logsStatus.textContent = "Erro de Rede";
+    adicionarLog(`Erro de conexão local: ${err.message}`, true);
+    if (statusLogs) {
+      statusLogs.className = "badge bg-danger";
+      statusLogs.textContent = "Erro de Rede";
     }
-    if (btn) {
-      btn.disabled = false;
-      btn.innerHTML = originalBtnHtml || '<i class="bi bi-cloud-arrow-up-fill"></i> Tentar Novamente';
+    if (elementoBotao) {
+      elementoBotao.disabled = false;
+      elementoBotao.innerHTML = htmlBotaoOriginal || '<i class="bi bi-cloud-arrow-up-fill"></i> Tentar Novamente';
     }
-    if (alertEl && alertText) {
-      alertEl.classList.remove("d-none", "alert-success");
-      alertEl.classList.add("alert-danger");
-      alertText.textContent = `Erro de comunicação com o servidor: ${err.message}`;
+    if (elementoAlerta && elementoAlertaTexto) {
+      elementoAlerta.classList.remove("d-none", "alert-success");
+      elementoAlerta.classList.add("alert-danger");
+      elementoAlertaTexto.textContent = `Erro de comunicação com o servidor: ${err.message}`;
     }
   }
 }
+
+// Mantém compatibilidade com chamadas existentes no HTML/templates
+const createICDirectlyInRedmine = criarItemCatalogoNoRedmine;
 
 
 
