@@ -227,13 +227,27 @@ def test_update_catalog_item_redmine_id():
     assert data["redmine_id"] == "294999"
     assert data["status"] == "criado"
 
-    # 3. Check history page contains the Redmine issue ID
+    # 3. Check history page contains the Redmine issue ID and does NOT contain delete button for this created item
     hist_res = client.get("/history")
     assert hist_res.status_code == 200
     assert "294999" in hist_res.text
+    assert f"/catalog-items/{item_id}/delete" not in hist_res.text
 
-    # Clean up
-    client.post(f"/catalog-items/{item_id}/delete")
+    # 4. Attempting to delete an item created in Redmine should be blocked by backend
+    del_res = client.post(f"/catalog-items/{item_id}/delete")
+    assert del_res.status_code in (200, 302, 303)
+
+    from app.core.database import SessionLocal
+    from app.models.catalog_item import CatalogItem
+    db = SessionLocal()
+    try:
+        item = db.get(CatalogItem, item_id)
+        assert item is not None  # Exclusão bloqueada com sucesso!
+        # Limpeza direta no banco de dados para isolamento do teste
+        db.delete(item)
+        db.commit()
+    finally:
+        db.close()
 
 
 def test_import_teams_calls_17_minutes():

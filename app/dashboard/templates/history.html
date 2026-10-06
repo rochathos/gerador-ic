@@ -208,11 +208,13 @@
                     <button type="button" class="btn btn-outline-info copy-btn py-1 px-2" data-copy="TÍTULO:&#10;{{ ic.title }}&#10;&#10;DESCRIÇÃO:&#10;{{ ic.description }}" title="Copiar Título e Descrição para Redmine">
                       <i class="bi bi-clipboard"></i> Copiar
                     </button>
+                    {% if ic.status != 'criado' and not ic.redmine_id %}
                     <form method="POST" action="/catalog-items/{{ ic.id }}/delete" class="d-inline" onsubmit="return confirm('Deseja realmente excluir este Item de Catálogo #{{ ic.id }}?');">
                       <button type="submit" class="btn btn-outline-danger py-1 px-2" title="Excluir IC do Banco">
                         <i class="bi bi-trash"></i>
                       </button>
                     </form>
+                    {% endif %}
                   </div>
                 </td>
               </tr>

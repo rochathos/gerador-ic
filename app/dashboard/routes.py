@@ -838,11 +838,14 @@ def catalog_items_view(request: Request, db: Session = Depends(get_db)):
 
 @router.post("/catalog-items/{item_id}/delete")
 def delete_catalog_item(item_id: int, request: Request, db: Session = Depends(get_db)):
-    """Delete a Catalog Item."""
+    """Delete a Catalog Item (blocked for items created in Redmine)."""
     item = db.get(CatalogItem, item_id)
     if item:
-        db.delete(item)
-        db.commit()
+        if item.status == "criado" or item.redmine_id:
+            logger.warning(f"Exclusão bloqueada: IC #{item_id} possui status 'criado' ou já está registrado no Redmine.")
+        else:
+            db.delete(item)
+            db.commit()
     referer = request.headers.get("referer", "/history")
     redirect_url = referer if ("/catalog-items" in referer or "/history" in referer) else "/history"
     return RedirectResponse(url=redirect_url, status_code=303)
