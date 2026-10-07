@@ -584,6 +584,80 @@ class GitService:
         return ""
 
     @classmethod
+    def _montar_dados_commit(
+        cls,
+        repo: git.Repo,
+        repo_path: Path,
+        commit: git.Commit,
+        files_changed: List[Dict[str, Any]],
+        branch: Optional[str] = None,
+        analyze_xml: bool = True,
+    ) -> Dict[str, Any]:
+        """Constrói e padroniza o dicionário de dados e métricas de IC de um commit."""
+        has_xml = any(
+            f.get("is_xml") or cls.decode_git_path(str(f.get("path", ""))).lower().endswith(".xml")
+            for f in files_changed
+            if isinstance(f, dict)
+        )
+        has_sql = any(
+            f.get("is_sql") or cls.decode_git_path(str(f.get("path", ""))).lower().endswith(".sql")
+            for f in files_changed
+            if isinstance(f, dict)
+        )
+
+        xml_analysis = cls.analyze_commit_xml_tags(repo, commit.hexsha) if (has_xml and analyze_xml) else {
+            "added": {},
+            "removed": {},
+            "total_added": 0,
+            "total_removed": 0,
+            "total_ics": 0,
+            "flows": {},
+        }
+        sql_analysis = cls.analisar_scripts_sql_commit(repo, commit.hexsha) if has_sql else {
+            "arquivos": {},
+            "casos_de_uso": [],
+            "total_ics": 0,
+            "operacoes": {},
+        }
+
+        total_xml_ics = xml_analysis.get("total_ics", 0)
+        if total_xml_ics == 0 and has_xml:
+            total_xml_ics = 1
+
+        total_sql_ics = sql_analysis.get("total_ics", 0)
+        if total_sql_ics == 0 and has_sql:
+            total_sql_ics = 1
+
+        author_name = commit.author.name or ""
+        author_email = commit.author.email or ""
+        author_display = f"{author_name} <{author_email}>" if author_email else author_name
+
+        clean_b = (branch or "").strip()
+        if clean_b and clean_b.upper() not in ["ALL", "TODAS"]:
+            commit_branch = clean_b
+        else:
+            commit_branch = cls.get_commit_branch(repo_path, commit.hexsha)
+
+        return {
+            "hash": commit.hexsha,
+            "author": author_display,
+            "author_name": author_name,
+            "author_email": author_email,
+            "commit_date": commit.committed_datetime,
+            "message": commit.message.strip(),
+            "files_changed": files_changed,
+            "repo_name": cls.get_repo_name(repo_path),
+            "repo_path": str(repo_path),
+            "branch": commit_branch,
+            "commit_url": cls.get_commit_url(repo_path, commit.hexsha),
+            "xml_tags_metrics": xml_analysis,
+            "sql_scripts_metrics": sql_analysis,
+            "ic_count_xml": total_xml_ics,
+            "ic_count_sql": total_sql_ics,
+            "ic_count": total_xml_ics + total_sql_ics,
+        }
+
+    @classmethod
     def get_commits(
         cls,
         repo_path: str | Path,
@@ -652,66 +726,16 @@ class GitService:
                     if author_query not in author_name and author_query not in author_email:
                         continue
 
-                # Get changed files with diff metrics (insertions, deletions, lines) using -M rename detection
                 files_changed = cls.get_commit_files(repo, commit.hexsha)
-
-                # Check for XML changes and analyze tags using icf.sh rules (lazy-loaded if analyze_xml is False)
-                has_xml = any(
-                    f.get("is_xml") or cls.decode_git_path(str(f.get("path", ""))).lower().endswith(".xml")
-                    for f in files_changed
-                    if isinstance(f, dict)
+                dados_commit = cls._montar_dados_commit(
+                    repo=repo,
+                    repo_path=path,
+                    commit=commit,
+                    files_changed=files_changed,
+                    branch=clean_b,
+                    analyze_xml=analyze_xml,
                 )
-                has_sql = any(
-                    f.get("is_sql") or cls.decode_git_path(str(f.get("path", ""))).lower().endswith(".sql")
-                    for f in files_changed
-                    if isinstance(f, dict)
-                )
-                xml_analysis = cls.analyze_commit_xml_tags(repo, commit.hexsha) if (has_xml and analyze_xml) else {
-                    "added": {},
-                    "removed": {},
-                    "total_added": 0,
-                    "total_removed": 0,
-                    "total_ics": 0,
-                    "flows": {},
-                }
-                sql_analysis = cls.analisar_scripts_sql_commit(repo, commit.hexsha) if has_sql else {
-                    "arquivos": {},
-                    "casos_de_uso": [],
-                    "total_ics": 0,
-                    "operacoes": {},
-                }
-
-                total_xml_ics = xml_analysis.get("total_ics", 0)
-                if total_xml_ics == 0 and has_xml:
-                    total_xml_ics = 1
-                total_sql_ics = sql_analysis.get("total_ics", 0)
-                if total_sql_ics == 0 and has_sql:
-                    total_sql_ics = 1
-
-                commit_author_display = f"{commit.author.name} <{commit.author.email}>" if commit.author.email else commit.author.name
-                commit_url = cls.get_commit_url(path, commit.hexsha)
-                commit_branch = clean_b if (clean_b and clean_b.upper() not in ["ALL", "TODAS"]) else cls.get_commit_branch(path, commit.hexsha)
-
-                commits_found.append(
-                    {
-                        "hash": commit.hexsha,
-                        "author": commit_author_display,
-                        "author_name": commit.author.name or "",
-                        "author_email": commit.author.email or "",
-                        "commit_date": commit_dt,
-                        "message": commit.message.strip(),
-                        "files_changed": files_changed,
-                        "repo_name": cls.get_repo_name(path),
-                        "repo_path": str(path),
-                        "branch": commit_branch,
-                        "commit_url": commit_url,
-                        "xml_tags_metrics": xml_analysis,
-                        "sql_scripts_metrics": sql_analysis,
-                        "ic_count_xml": total_xml_ics,
-                        "ic_count_sql": total_sql_ics,
-                        "ic_count": total_xml_ics + total_sql_ics,
-                    }
-                )
+                commits_found.append(dados_commit)
 
             # Sort chronologically (oldest to newest)
             commits_found.sort(key=lambda c: c["commit_date"])
@@ -733,48 +757,14 @@ class GitService:
             repo = git.Repo(path)
             c = repo.commit(commit_hash.strip())
             files_changed = cls.get_commit_files(repo, c.hexsha)
-
-            has_xml = any(f.get("is_xml") for f in files_changed)
-            has_sql = any(f.get("is_sql") for f in files_changed)
-            xml_analysis = cls.analyze_commit_xml_tags(repo, c.hexsha) if has_xml else {
-                "added": {},
-                "removed": {},
-                "total_added": 0,
-                "total_removed": 0,
-                "total_ics": 0,
-                "flows": {},
-            }
-            sql_analysis = cls.analisar_scripts_sql_commit(repo, c.hexsha) if has_sql else {
-                "arquivos": {},
-                "casos_de_uso": [],
-                "total_ics": 0,
-                "operacoes": {},
-            }
-            total_xml_ics = xml_analysis.get("total_ics", 0)
-            if total_xml_ics == 0 and has_xml:
-                total_xml_ics = 1
-            total_sql_ics = sql_analysis.get("total_ics", 0)
-            if total_sql_ics == 0 and has_sql:
-                total_sql_ics = 1
-            author_display = f"{c.author.name} <{c.author.email}>" if c.author.email else c.author.name
-            return {
-                "hash": c.hexsha,
-                "author": author_display,
-                "author_name": c.author.name or "",
-                "author_email": c.author.email or "",
-                "commit_date": c.committed_datetime,
-                "message": c.message.strip(),
-                "files_changed": files_changed,
-                "repo_name": cls.get_repo_name(path),
-                "repo_path": str(path),
-                "branch": cls.get_commit_branch(path, c.hexsha),
-                "commit_url": cls.get_commit_url(path, c.hexsha),
-                "xml_tags_metrics": xml_analysis,
-                "sql_scripts_metrics": sql_analysis,
-                "ic_count_xml": total_xml_ics,
-                "ic_count_sql": total_sql_ics,
-                "ic_count": total_xml_ics + total_sql_ics,
-            }
+            return cls._montar_dados_commit(
+                repo=repo,
+                repo_path=path,
+                commit=c,
+                files_changed=files_changed,
+                branch=None,
+                analyze_xml=True,
+            )
         except Exception as exc:
             logger.debug(f"Commit {commit_hash} não encontrado diretamente no Git: {exc}")
             return None
@@ -876,49 +866,16 @@ class GitService:
                 has_more = True
                 break
 
-            has_xml = any(f.get("is_xml") for f in files_changed)
-            has_sql = any(f.get("is_sql") for f in files_changed)
-            xml_analysis = cls.analyze_commit_xml_tags(repo, commit.hexsha) if (has_xml and analyze_xml) else {
-                "added": {},
-                "removed": {},
-                "total_added": 0,
-                "total_removed": 0,
-                "total_ics": 0,
-                "flows": {},
-            }
-            sql_analysis = cls.analisar_scripts_sql_commit(repo, commit.hexsha) if has_sql else {
-                "arquivos": {},
-                "casos_de_uso": [],
-                "total_ics": 0,
-                "operacoes": {},
-            }
-            total_xml_ics = xml_analysis.get("total_ics", 0)
-            if total_xml_ics == 0 and has_xml:
-                total_xml_ics = 1
-            total_sql_ics = sql_analysis.get("total_ics", 0)
-            if total_sql_ics == 0 and has_sql:
-                total_sql_ics = 1
-            author_display = f"{c_author_name} <{c_author_email}>" if c_author_email else c_author_name
-            commit_branch = clean_b if (clean_b and clean_b.upper() not in ["ALL", "TODAS"]) else cls.get_commit_branch(path, commit.hexsha)
-
-            matched_commits.append({
-                "hash": commit.hexsha,
-                "author": author_display,
-                "author_name": c_author_name,
-                "author_email": c_author_email,
-                "commit_date": commit_dt,
-                "message": msg,
-                "files_changed": files_changed,
-                "repo_name": cls.get_repo_name(path),
-                "repo_path": str(path),
-                "branch": commit_branch,
-                "commit_url": cls.get_commit_url(path, commit.hexsha),
-                "xml_tags_metrics": xml_analysis,
-                "sql_scripts_metrics": sql_analysis,
-                "ic_count_xml": total_xml_ics,
-                "ic_count_sql": total_sql_ics,
-                "ic_count": total_xml_ics + total_sql_ics,
-            })
+            dados_commit = cls._montar_dados_commit(
+                repo=repo,
+                repo_path=path,
+                commit=commit,
+                files_changed=files_changed,
+                branch=clean_b,
+                analyze_xml=analyze_xml,
+            )
+            matched_commits.append(dados_commit)
 
         return matched_commits, has_more
+
 
