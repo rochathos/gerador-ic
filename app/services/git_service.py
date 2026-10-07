@@ -28,12 +28,12 @@ class GitService:
         "task",
         "variable",
         "swimlane",
+        "assignment",
     }
     EXCLUDED_XML_TAGS = {
         "end-state",
         "process-definition",
         "start-state",
-        "assignment",
         "controller",
         "script",
         "event",
@@ -48,6 +48,8 @@ class GitService:
     NAME_ATTR_REGEX = re.compile(r'name=["\']([^"\']+)["\']')
     TO_ATTR_REGEX = re.compile(r'to=["\']([^"\']+)["\']')
     EXPR_ATTR_REGEX = re.compile(r'expression=["\']([^"\']*)["\']')
+    ACTOR_ATTR_REGEX = re.compile(r'(?:pooled-actors|actor-id|class)=["\']([^"\']*)["\']')
+
 
     @classmethod
     def analyze_commit_xml_tags(cls, repo: git.Repo, commit_hash: str) -> Dict[str, Any]:
@@ -55,21 +57,21 @@ class GitService:
         flows: Dict[str, Dict[str, Any]] = {}
         current_flow: Optional[str] = None
 
-        flow_del_items: List[Tuple[str, str, str, str, str]] = []
-        flow_add_items: List[Tuple[str, str, str, str, str]] = []
+        flow_del_items: List[Tuple[str, str, str, str, str, str]] = []
+        flow_add_items: List[Tuple[str, str, str, str, str, str]] = []
 
         def finalize_flow():
             nonlocal current_flow, flow_del_items, flow_add_items
             if not current_flow:
                 return
 
-            unmatched_del: List[Tuple[str, str, str, str, str]] = []
+            unmatched_del: List[Tuple[str, str, str, str, str, str]] = []
             matched_items: List[Tuple[str, str]] = []
 
-            # Pass 1: smart match by identifier (name, to, expression) within same tag
-            for dt, dn, dto, dex, da in flow_del_items:
+            # Pass 1: smart match by identifier (name, to, expression, actor) within same tag
+            for dt, dn, dto, dex, dact, da in flow_del_items:
                 matched = False
-                for at, an, ato, aex, aa in list(flow_add_items):
+                for at, an, ato, aex, aact, aa in list(flow_add_items):
                     if dt == at:
                         is_match = False
                         if dn and an and (dn == an or dn in an or an in dn):
@@ -78,38 +80,40 @@ class GitService:
                             is_match = True
                         elif dex and aex and (dex == aex or dex in aex or aex in dex):
                             is_match = True
+                        elif dact and aact and (dact == aact or dact in aact or aact in dact):
+                            is_match = True
 
                         if is_match:
-                            matched_items.append((dt, dn or dto or dex))
-                            flow_add_items.remove((at, an, ato, aex, aa))
+                            matched_items.append((dt, dn or dto or dex or dact))
+                            flow_add_items.remove((at, an, ato, aex, aact, aa))
                             matched = True
                             break
                 if not matched:
-                    unmatched_del.append((dt, dn, dto, dex, da))
+                    unmatched_del.append((dt, dn, dto, dex, dact, da))
 
             # Pass 2: match remaining deletions and additions of the same tag as adjustments
-            final_unmatched_del: List[Tuple[str, str, str, str, str]] = []
-            for dt, dn, dto, dex, da in unmatched_del:
+            final_unmatched_del: List[Tuple[str, str, str, str, str, str]] = []
+            for dt, dn, dto, dex, dact, da in unmatched_del:
                 matched = False
-                for at, an, ato, aex, aa in list(flow_add_items):
+                for at, an, ato, aex, aact, aa in list(flow_add_items):
                     if dt == at:
-                        matched_items.append((dt, dn or dto or dex))
-                        flow_add_items.remove((at, an, ato, aex, aa))
+                        matched_items.append((dt, dn or dto or dex or dact))
+                        flow_add_items.remove((at, an, ato, aex, aact, aa))
                         matched = True
                         break
                 if not matched:
-                    final_unmatched_del.append((dt, dn, dto, dex, da))
+                    final_unmatched_del.append((dt, dn, dto, dex, dact, da))
 
             f_added: Dict[str, int] = {}
             f_removed: Dict[str, int] = {}
             f_modified: Dict[str, int] = {}
 
             # Unmatched deletions -> removals
-            for dt, _, _, _, _ in final_unmatched_del:
+            for dt, _, _, _, _, _ in final_unmatched_del:
                 f_removed[dt] = f_removed.get(dt, 0) + 1
 
             # Unmatched additions -> additions
-            for at, _, _, _, _ in flow_add_items:
+            for at, _, _, _, _, _ in flow_add_items:
                 f_added[at] = f_added.get(at, 0) + 1
 
             # Matched pairs -> modifications (adjustments: 1 addition + 1 deletion = 1 adjustment)
@@ -176,21 +180,22 @@ class GitService:
                     to_val = m_to.group(1) if m_to else ""
                     m_expr = cls.EXPR_ATTR_REGEX.search(attrs)
                     expr_val = m_expr.group(1) if m_expr else ""
+                    m_actor = cls.ACTOR_ATTR_REGEX.search(attrs)
+                    actor_val = m_actor.group(1) if m_actor else ""
 
                     if sign == "-":
-                        flow_del_items.append((tag, name_val, to_val, expr_val, attrs))
+                        flow_del_items.append((tag, name_val, to_val, expr_val, actor_val, attrs))
                     else:
-                        flow_add_items.append((tag, name_val, to_val, expr_val, attrs))
+                        flow_add_items.append((tag, name_val, to_val, expr_val, actor_val, attrs))
 
             finalize_flow()
-        except Exception as exc:
-            logger.debug(f"Erro ao extrair diff de tags XML para o commit {commit_hash[:7]}: {exc}")
         except Exception as exc:
             logger.debug(f"Erro ao extrair diff de tags XML para o commit {commit_hash[:7]}: {exc}")
 
         total_added = sum(f["total_added"] for f in flows.values())
         total_removed = sum(f["total_removed"] for f in flows.values())
         total_modified = sum(f["total_modified"] for f in flows.values())
+
         total_ics = total_added + total_removed + total_modified
 
         commit_added: Dict[str, int] = {}

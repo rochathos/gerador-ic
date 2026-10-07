@@ -64,7 +64,7 @@ def test_xml_files_metrics():
     from app.models.commit import CommitItem
 
     now = datetime.now(timezone.utc)
-    start_date = now - timedelta(days=7)
+    start_date = now - timedelta(days=30)
     end_date = now + timedelta(days=1)
 
     raw_commits = GitService.get_commits(
@@ -92,15 +92,17 @@ def test_xml_tags_ic_counting():
     assert "process-definition" in GitService.EXCLUDED_XML_TAGS
     assert "start-state" in GitService.EXCLUDED_XML_TAGS
     assert "end-state" in GitService.EXCLUDED_XML_TAGS
-    assert "assignment" in GitService.EXCLUDED_XML_TAGS
+    assert "assignment" not in GitService.EXCLUDED_XML_TAGS
+    assert "assignment" in GitService.IC_NODE_TAGS
     assert "controller" in GitService.EXCLUDED_XML_TAGS
     assert "script" in GitService.EXCLUDED_XML_TAGS
     assert "event" in GitService.EXCLUDED_XML_TAGS
 
-    # Must NOT be in excluded: transition, condition, task, action, swimlane, variable
-    for tag in ("transition", "condition", "task", "action", "swimlane", "variable"):
+    # Must NOT be in excluded: transition, condition, task, action, swimlane, variable, assignment
+    for tag in ("transition", "condition", "task", "action", "swimlane", "variable", "assignment"):
         assert tag not in GitService.EXCLUDED_XML_TAGS
         assert tag in GitService.IC_NODE_TAGS
+
 
     # Test regex tag parsing for additions (+)
     line1 = '+   <transition to="fim" name="concluir"/>'
@@ -522,6 +524,31 @@ def test_get_branches_caching():
     # Clear cache removes it
     GitService.clear_branches_cache(repo_path)
     assert cache_key not in GitService._BRANCHES_CACHE
+
+
+def test_analyze_commit_xml_tags_assignment():
+    """Test that <assignment> tag is counted as IC for adjustments and additions (e.g. commit 9166a30)."""
+    from unittest.mock import MagicMock
+
+    patch = """diff --git "a/Fluxos/1o Grau/Geral/Analise.xml" "b/Fluxos/1o Grau/Geral/Analise.xml"
+--- "a/Fluxos/1o Grau/Geral/Analise.xml"
++++ "b/Fluxos/1o Grau/Geral/Analise.xml"
+@@ -5,4 +5,4 @@
+     <swimlane name="Secretaria de Gabinete">
+-        <assignment pooled-actors="#{localizacaoAssignment.getPooledActors('111119:1469,111120:5970')}"/>
++        <assignment pooled-actors="#{localizacaoAssignment.getPooledActors('111119:1469,111120:5970,6:1338')}"/>
+     </swimlane>
+"""
+    repo = MagicMock()
+    repo.git.show.return_value = patch
+
+    result = GitService.analyze_commit_xml_tags(repo, "9166a30cd0dcafe9bc3b4d699c59ad16b86ba98b")
+    assert result["total_added"] == 0
+    assert result["total_removed"] == 0
+    assert result["total_modified"] == 1
+    assert result["total_ics"] == 1
+    assert result["modified"]["assignment"] == 1
+
 
 
 
