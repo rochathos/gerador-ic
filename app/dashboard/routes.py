@@ -171,7 +171,12 @@ def home_view(
     stmt_exec = select(ExecutionHistory).order_by(desc(ExecutionHistory.created_at)).limit(1)
     latest_exec = db.execute(stmt_exec).scalar_one_or_none()
 
-    active_repo = repo_path.strip() if repo_path else settings.DEFAULT_GIT_REPO_PATH
+    if repo_path and repo_path.strip():
+        active_repo = repo_path.strip()
+    elif settings.GIT_ACCESS_TOKEN:
+        active_repo = settings.DEFAULT_REPO_NAME or "PJE"
+    else:
+        active_repo = settings.DEFAULT_GIT_REPO_PATH
     active_author = author.strip() if author is not None else (settings.GIT_AUTHOR_NAME or "")
     selected_branch = branch.strip() if branch else ""
 
@@ -181,7 +186,7 @@ def home_view(
     active_branch = ""
     local_branches = []
     remote_branches = []
-    if Path(active_repo).exists():
+    if bool(settings.GIT_ACCESS_TOKEN) or (active_repo and Path(active_repo).exists()):
         branch_info = GitService.get_branches(active_repo)
         active_branch = branch_info.get("active", "")
         local_branches = branch_info.get("local", [])
@@ -228,7 +233,7 @@ def home_view(
             end_date_val = end_dt.strftime("%Y-%m-%dT%H:%M")
 
         # Query Git directly for author's recent commits in real-time
-        if Path(active_repo).exists():
+        if bool(settings.GIT_ACCESS_TOKEN) or (active_repo and Path(active_repo).exists()):
             try:
                 raw_commits, _ = GitService.get_commits_paged(
                     repo_path=active_repo,
@@ -290,7 +295,7 @@ def analyze_period(
     request: Request,
     start_date: str = Form(...),
     end_date: str = Form(...),
-    repo_path: str = Form(...),
+    repo_path: Optional[str] = Form(None),
     author: Optional[str] = Form(None),
     branch: Optional[str] = Form(None),
     db: Session = Depends(get_db),
@@ -306,7 +311,13 @@ def analyze_period(
             status_code=303,
         )
 
-    clean_path = repo_path.strip()
+    if repo_path and repo_path.strip():
+        clean_path = repo_path.strip()
+    elif settings.GIT_ACCESS_TOKEN:
+        clean_path = settings.DEFAULT_REPO_NAME or "PJE"
+    else:
+        clean_path = settings.DEFAULT_GIT_REPO_PATH
+
     is_valid, msg = GitService.validate_repository(clean_path)
     if not is_valid:
         logger.warning(f"Validação de repositório falhou: {msg}")
@@ -318,8 +329,9 @@ def analyze_period(
     clean_branch = branch.strip() if branch else ""
     author_param = f"&author={quote_plus(author.strip())}" if author else ""
     branch_param = f"&branch={quote_plus(clean_branch)}" if clean_branch else ""
+    repo_param = f"&repo_path={quote_plus(clean_path)}" if clean_path else ""
     return RedirectResponse(
-        url=f"/?start_date={start_date}&end_date={end_date}&repo_path={clean_path}{author_param}{branch_param}",
+        url=f"/?start_date={start_date}&end_date={end_date}{repo_param}{author_param}{branch_param}",
         status_code=303,
     )
 
@@ -633,7 +645,7 @@ def commits_view(
     local_branches = []
     remote_branches = []
 
-    if Path(active_repo).exists():
+    if bool(settings.GIT_ACCESS_TOKEN) or (active_repo and Path(active_repo).exists()):
         branch_info = GitService.get_branches(active_repo)
         active_branch = branch_info.get("active", "")
         local_branches = branch_info.get("local", [])
@@ -678,7 +690,7 @@ def commits_view(
             "active_page": "commits",
             "commits": commits,
             "has_more": has_more,
-            "next_skip": len(commits),
+            "next_skip": 20,
             "available_repos": available_repos,
             "selected_repo": repo_name or (settings.DEFAULT_REPO_NAME or "PJE"),
             "filter_start_date": start_date or "",
@@ -707,10 +719,10 @@ def api_git_branches(
 ):
     """API endpoint to get list of active, local, and remote branches for autocomplete."""
     active_repo = repo_path.strip() if repo_path and repo_path.strip() else settings.DEFAULT_REPO_PATH
-    if not Path(active_repo).exists():
+    if not (bool(settings.GIT_ACCESS_TOKEN) or (active_repo and Path(active_repo).exists())):
         return JSONResponse({"success": False, "message": "Repositório não encontrado", "active": "", "local": [], "remote": []})
 
-    branch_info = GitService.get_branches(active_repo, force_refresh=refresh)
+    branch_info = GitService.get_branches(active_repo or "", force_refresh=refresh)
     return JSONResponse({
         "success": True,
         "active": branch_info.get("active", ""),
@@ -774,7 +786,7 @@ def api_commits_git_paged(
             "success": True,
             "commits": commit_items,
             "has_more": has_more,
-            "next_skip": skip + len(commit_items),
+            "next_skip": skip + limit,
             "count": len(commit_items),
         })
     except Exception as exc:
@@ -796,7 +808,7 @@ def api_commits_inspect(
         if not commit_data:
             return JSONResponse(
                 status_code=404,
-                content={"success": False, "message": f"Commit '{clean_hash}' não encontrado no repositório local."},
+                content={"success": False, "message": f"Commit '{clean_hash}' não encontrado."},
             )
 
         saved_stmt = select(CatalogItem).where(CatalogItem.commit_hash.is_not(None))

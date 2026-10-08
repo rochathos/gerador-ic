@@ -65,6 +65,25 @@ def test_analyze_endpoint():
     assert "start_date=" in response_live.headers["location"]
 
 
+def test_analyze_endpoint_without_repo_path():
+    """Test analyzing period via POST /analyze without repo_path (using token/default)."""
+    now = datetime.now()
+    start_str = (now - timedelta(days=2)).strftime("%Y-%m-%dT%H:%M")
+    end_str = (now + timedelta(days=1)).strftime("%Y-%m-%dT%H:%M")
+
+    response = client.post(
+        "/analyze",
+        data={
+            "start_date": start_str,
+            "end_date": end_str,
+            "author": settings.GIT_AUTHOR_NAME or "",
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    assert "start_date=" in response.headers["location"]
+
+
 
 def test_create_single_ic_endpoint():
     """Test creating an individual IC via POST /api/create-ic."""

@@ -55,6 +55,8 @@ class Settings(BaseSettings):
     DEFAULT_REPO_NAME: Optional[str] = "PJE"
     GIT_AUTHOR_NAME: Optional[str] = "athos.rocha"
     GIT_AUTHOR_EMAIL: Optional[str] = "athosrocha123@gmail.com"
+    GIT_ACCESS_TOKEN: Optional[str] = None
+    GITLAB_URL: str = "https://git.tjce.jus.br"
 
     # Redmine Config (Corporate)
     REDMINE_URL: str = "https://redmine.corporativo.local"

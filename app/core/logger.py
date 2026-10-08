@@ -1,6 +1,20 @@
+import re
 import sys
 from loguru import logger
 from app.core.config import settings
+
+
+def _mascarar_segredos(record: dict) -> None:
+    """Sanitiza mensagens de log para mascarar tokens e chaves sensíveis."""
+    msg = str(record["message"])
+    if "glpat-" in msg:
+        msg = re.sub(r"glpat-[a-zA-Z0-9_\-]+", "glpat-***[MASKED]***", msg)
+    if settings.GIT_ACCESS_TOKEN and settings.GIT_ACCESS_TOKEN in msg:
+        msg = msg.replace(settings.GIT_ACCESS_TOKEN, "glpat-***[MASKED]***")
+    if settings.REDMINE_API_KEY and settings.REDMINE_API_KEY in msg:
+        msg = msg.replace(settings.REDMINE_API_KEY, "***[REDMINE_KEY_MASKED]***")
+    record["message"] = msg
+
 
 # Remove default handler
 logger.remove()
@@ -24,5 +38,8 @@ logger.add(
     level=settings.LOG_LEVEL,
     enqueue=True,
 )
+
+# Apply global masking patch
+logger = logger.patch(_mascarar_segredos)
 
 __all__ = ["logger"]
