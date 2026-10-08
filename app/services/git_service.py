@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
@@ -6,6 +7,31 @@ import time
 import git
 from git.exc import InvalidGitRepositoryError, NoSuchPathError
 from app.core.logger import logger
+
+
+@dataclass
+class _XmlTagItem:
+    """Representa um elemento de tag XML extraído do diff com seus atributos identificadores."""
+    tag: str
+    name: str = ""
+    to: str = ""
+    expr: str = ""
+    actor: str = ""
+    attrs: str = ""
+
+    def identifica_mesmo_item(self, outro: "_XmlTagItem") -> bool:
+        """Verifica se dois itens de mesma tag correspondem à mesma entidade lógica para detecção de alteração/ajuste."""
+        if self.tag != outro.tag:
+            return False
+        if self.name and outro.name and (self.name == outro.name or self.name in outro.name or outro.name in self.name):
+            return True
+        if self.to and outro.to and self.to == outro.to:
+            return True
+        if self.expr and outro.expr and (self.expr == outro.expr or self.expr in outro.expr or outro.expr in self.expr):
+            return True
+        if self.actor and outro.actor and (self.actor == outro.actor or self.actor in outro.actor or outro.actor in self.actor):
+            return True
+        return False
 
 
 class GitService:
@@ -50,83 +76,144 @@ class GitService:
     EXPR_ATTR_REGEX = re.compile(r'expression=["\']([^"\']*)["\']')
     ACTOR_ATTR_REGEX = re.compile(r'(?:pooled-actors|actor-id|class)=["\']([^"\']*)["\']')
 
+    # Caches em memória e controle de TTL
+    _BRANCHES_CACHE: Dict[str, Dict[str, Any]] = {}
+    _BRANCHES_CACHE_TTL: int = 300  # 5 minutos
+    _COMMIT_BRANCH_CACHE: Dict[str, str] = {}
+
+
+    @classmethod
+    def _parsear_linha_tag_xml(cls, line: str) -> Optional[Tuple[str, _XmlTagItem]]:
+        """Extrai sinal (+/-) e item de tag XML de uma linha de diff caso seja um nó de IC válido."""
+        if not line:
+            return None
+        sign = line[0]
+        if sign not in ("+", "-"):
+            return None
+        if line.startswith("+++") or line.startswith("---") or line.startswith("@@"):
+            return None
+
+        m = cls.TAG_REGEX.match(line)
+        if not m:
+            return None
+
+        tag = m.group(1).lower()
+        if tag in cls.EXCLUDED_XML_TAGS or tag not in cls.IC_NODE_TAGS:
+            return None
+
+        attrs = m.group(2) or ""
+        m_name = cls.NAME_ATTR_REGEX.search(attrs)
+        m_to = cls.TO_ATTR_REGEX.search(attrs)
+        m_expr = cls.EXPR_ATTR_REGEX.search(attrs)
+        m_actor = cls.ACTOR_ATTR_REGEX.search(attrs)
+
+        item = _XmlTagItem(
+            tag=tag,
+            name=m_name.group(1) if m_name else "",
+            to=m_to.group(1) if m_to else "",
+            expr=m_expr.group(1) if m_expr else "",
+            actor=m_actor.group(1) if m_actor else "",
+            attrs=attrs,
+        )
+        return sign, item
+
+    @classmethod
+    def _parear_tags_fluxo(
+        cls,
+        del_items: List[_XmlTagItem],
+        add_items: List[_XmlTagItem],
+    ) -> Tuple[Dict[str, int], Dict[str, int], Dict[str, int]]:
+        """Realiza casamento em dois passos entre adições e remoções de tags para identificar ajustes."""
+        remaining_add = list(add_items)
+        unmatched_del: List[_XmlTagItem] = []
+        f_modified: Dict[str, int] = {}
+        f_added: Dict[str, int] = {}
+        f_removed: Dict[str, int] = {}
+
+        # Passo 1: Casamento inteligente por identificadores (name, to, expr, actor)
+        for d_item in del_items:
+            matched = False
+            for a_item in remaining_add:
+                if d_item.identifica_mesmo_item(a_item):
+                    f_modified[d_item.tag] = f_modified.get(d_item.tag, 0) + 1
+                    remaining_add.remove(a_item)
+                    matched = True
+                    break
+            if not matched:
+                unmatched_del.append(d_item)
+
+        # Passo 2: Casamento por tipo de tag restante (ajuste/substituição dentro da mesma tag)
+        final_del: List[_XmlTagItem] = []
+        for d_item in unmatched_del:
+            matched = False
+            for a_item in remaining_add:
+                if d_item.tag == a_item.tag:
+                    f_modified[d_item.tag] = f_modified.get(d_item.tag, 0) + 1
+                    remaining_add.remove(a_item)
+                    matched = True
+                    break
+            if not matched:
+                final_del.append(d_item)
+
+        for d_item in final_del:
+            f_removed[d_item.tag] = f_removed.get(d_item.tag, 0) + 1
+
+        for a_item in remaining_add:
+            f_added[a_item.tag] = f_added.get(a_item.tag, 0) + 1
+
+        return f_added, f_removed, f_modified
+
+    @staticmethod
+    def _agregar_metricas_xml(flows: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+        """Totaliza métricas de tags adicionadas, removidas e modificadas entre todos os fluxos."""
+        commit_added: Dict[str, int] = {}
+        commit_removed: Dict[str, int] = {}
+        commit_modified: Dict[str, int] = {}
+
+        for f in flows.values():
+            for t, c in f["added"].items():
+                commit_added[t] = commit_added.get(t, 0) + c
+            for t, c in f["removed"].items():
+                commit_removed[t] = commit_removed.get(t, 0) + c
+            for t, c in f["modified"].items():
+                commit_modified[t] = commit_modified.get(t, 0) + c
+
+        total_added = sum(commit_added.values())
+        total_removed = sum(commit_removed.values())
+        total_modified = sum(commit_modified.values())
+
+        return {
+            "added": commit_added,
+            "removed": commit_removed,
+            "modified": commit_modified,
+            "total_added": total_added,
+            "total_removed": total_removed,
+            "total_modified": total_modified,
+            "total_ics": total_added + total_removed + total_modified,
+            "flows": flows,
+        }
 
     @classmethod
     def analyze_commit_xml_tags(cls, repo: git.Repo, commit_hash: str) -> Dict[str, Any]:
         """Extract XML tag metrics (both added and removed) globally and per flow from commit diff with smart pairing."""
         flows: Dict[str, Dict[str, Any]] = {}
         current_flow: Optional[str] = None
-
-        flow_del_items: List[Tuple[str, str, str, str, str, str]] = []
-        flow_add_items: List[Tuple[str, str, str, str, str, str]] = []
+        del_items: List[_XmlTagItem] = []
+        add_items: List[_XmlTagItem] = []
 
         def finalize_flow():
-            nonlocal current_flow, flow_del_items, flow_add_items
+            nonlocal current_flow, del_items, add_items
             if not current_flow:
                 return
 
-            unmatched_del: List[Tuple[str, str, str, str, str, str]] = []
-            matched_items: List[Tuple[str, str]] = []
-
-            # Pass 1: smart match by identifier (name, to, expression, actor) within same tag
-            for dt, dn, dto, dex, dact, da in flow_del_items:
-                matched = False
-                for at, an, ato, aex, aact, aa in list(flow_add_items):
-                    if dt == at:
-                        is_match = False
-                        if dn and an and (dn == an or dn in an or an in dn):
-                            is_match = True
-                        elif dto and ato and dto == ato:
-                            is_match = True
-                        elif dex and aex and (dex == aex or dex in aex or aex in dex):
-                            is_match = True
-                        elif dact and aact and (dact == aact or dact in aact or aact in dact):
-                            is_match = True
-
-                        if is_match:
-                            matched_items.append((dt, dn or dto or dex or dact))
-                            flow_add_items.remove((at, an, ato, aex, aact, aa))
-                            matched = True
-                            break
-                if not matched:
-                    unmatched_del.append((dt, dn, dto, dex, dact, da))
-
-            # Pass 2: match remaining deletions and additions of the same tag as adjustments
-            final_unmatched_del: List[Tuple[str, str, str, str, str, str]] = []
-            for dt, dn, dto, dex, dact, da in unmatched_del:
-                matched = False
-                for at, an, ato, aex, aact, aa in list(flow_add_items):
-                    if dt == at:
-                        matched_items.append((dt, dn or dto or dex or dact))
-                        flow_add_items.remove((at, an, ato, aex, aact, aa))
-                        matched = True
-                        break
-                if not matched:
-                    final_unmatched_del.append((dt, dn, dto, dex, dact, da))
-
-            f_added: Dict[str, int] = {}
-            f_removed: Dict[str, int] = {}
-            f_modified: Dict[str, int] = {}
-
-            # Unmatched deletions -> removals
-            for dt, _, _, _, _, _ in final_unmatched_del:
-                f_removed[dt] = f_removed.get(dt, 0) + 1
-
-            # Unmatched additions -> additions
-            for at, _, _, _, _, _ in flow_add_items:
-                f_added[at] = f_added.get(at, 0) + 1
-
-            # Matched pairs -> modifications (adjustments: 1 addition + 1 deletion = 1 adjustment)
-            for dt, _ in matched_items:
-                f_modified[dt] = f_modified.get(dt, 0) + 1
-
+            f_added, f_removed, f_modified = cls._parear_tags_fluxo(del_items, add_items)
             f_tot_add = sum(f_added.values())
             f_tot_rem = sum(f_removed.values())
             f_tot_mod = sum(f_modified.values())
             f_tot_ics = f_tot_add + f_tot_rem + f_tot_mod
 
             flows[current_flow] = {
-                "flow_name": current_flow.split("/")[-1].split("\\")[-1],
+                "flow_name": current_flow.replace("\\", "/").split("/")[-1],
                 "path": current_flow,
                 "added": f_added,
                 "removed": f_removed,
@@ -136,9 +223,8 @@ class GitService:
                 "total_modified": f_tot_mod,
                 "total_ics": f_tot_ics,
             }
-
-            flow_del_items = []
-            flow_add_items = []
+            del_items = []
+            add_items = []
 
         try:
             patch_output = repo.git.show(commit_hash, "--pretty=format:", "-p", "-M", "--", "*.xml")
@@ -154,71 +240,19 @@ class GitService:
                             current_flow = "arquivo.xml"
                         continue
 
-                    if line.startswith("+++") or line.startswith("---") or line.startswith("@@"):
-                        continue
-
-                    sign = line[0] if line else ""
-                    if sign not in ("+", "-"):
-                        continue
-
-                    m = cls.TAG_REGEX.match(line)
-                    if not m:
-                        continue
-
-                    tag = m.group(1).lower()
-                    attrs = m.group(2) or ""
-
-                    if tag in cls.EXCLUDED_XML_TAGS:
-                        continue
-
-                    if tag not in cls.IC_NODE_TAGS:
-                        continue
-
-                    m_name = cls.NAME_ATTR_REGEX.search(attrs)
-                    name_val = m_name.group(1) if m_name else ""
-                    m_to = cls.TO_ATTR_REGEX.search(attrs)
-                    to_val = m_to.group(1) if m_to else ""
-                    m_expr = cls.EXPR_ATTR_REGEX.search(attrs)
-                    expr_val = m_expr.group(1) if m_expr else ""
-                    m_actor = cls.ACTOR_ATTR_REGEX.search(attrs)
-                    actor_val = m_actor.group(1) if m_actor else ""
-
-                    if sign == "-":
-                        flow_del_items.append((tag, name_val, to_val, expr_val, actor_val, attrs))
-                    else:
-                        flow_add_items.append((tag, name_val, to_val, expr_val, actor_val, attrs))
+                    parsed = cls._parsear_linha_tag_xml(line)
+                    if parsed:
+                        sign, item = parsed
+                        if sign == "-":
+                            del_items.append(item)
+                        else:
+                            add_items.append(item)
 
             finalize_flow()
         except Exception as exc:
             logger.debug(f"Erro ao extrair diff de tags XML para o commit {commit_hash[:7]}: {exc}")
 
-        total_added = sum(f["total_added"] for f in flows.values())
-        total_removed = sum(f["total_removed"] for f in flows.values())
-        total_modified = sum(f["total_modified"] for f in flows.values())
-
-        total_ics = total_added + total_removed + total_modified
-
-        commit_added: Dict[str, int] = {}
-        commit_removed: Dict[str, int] = {}
-        commit_modified: Dict[str, int] = {}
-        for f in flows.values():
-            for t, c in f["added"].items():
-                commit_added[t] = commit_added.get(t, 0) + c
-            for t, c in f["removed"].items():
-                commit_removed[t] = commit_removed.get(t, 0) + c
-            for t, c in f["modified"].items():
-                commit_modified[t] = commit_modified.get(t, 0) + c
-
-        return {
-            "added": commit_added,
-            "removed": commit_removed,
-            "modified": commit_modified,
-            "total_added": total_added,
-            "total_removed": total_removed,
-            "total_modified": total_modified,
-            "total_ics": total_ics,
-            "flows": flows,
-        }
+        return cls._agregar_metricas_xml(flows)
 
     @staticmethod
     def decode_git_path(path: str) -> str:
@@ -419,10 +453,6 @@ class GitService:
             pass
         return None
 
-
-    _BRANCHES_CACHE: Dict[str, Dict[str, Any]] = {}
-    _BRANCHES_CACHE_TTL: int = 300  # 5 minutos
-
     @classmethod
     def clear_branches_cache(cls, repo_path: Optional[str | Path] = None) -> None:
         """Clear cached branches for a specific repository or all repositories."""
@@ -485,103 +515,177 @@ class GitService:
             logger.warning(f"Erro ao listar branches do repositório {path}: {exc}")
             return {"active": "", "local": [], "remote": []}
 
-    _COMMIT_BRANCH_CACHE: Dict[str, str] = {}
+    @classmethod
+    def _obter_branches_contendo_commit(
+        cls, repo: git.Repo, commit_hash: str
+    ) -> Tuple[str, List[str], List[str]]:
+        """Obtém o nome da branch ativa e as listas de branches locais e remotas que contêm o commit."""
+        active = ""
+        if not repo.head.is_detached:
+            try:
+                active = cls.decode_git_path(repo.active_branch.name)
+            except Exception:
+                pass
+
+        raw_local: List[str] = []
+        try:
+            raw_local = [
+                cls.decode_git_path(b.strip("* ").strip())
+                for b in repo.git.branch("--contains", commit_hash).splitlines()
+                if b.strip()
+            ]
+        except Exception:
+            pass
+
+        raw_rem: List[str] = []
+        try:
+            raw_rem = [
+                cls.decode_git_path(b.strip().replace("origin/", ""))
+                for b in repo.git.branch("-r", "--contains", commit_hash).splitlines()
+                if b.strip() and "HEAD" not in b
+            ]
+        except Exception:
+            pass
+
+        return active, raw_local, raw_rem
+
+    @classmethod
+    def _resolver_branch_por_tarefa(
+        cls, repo: git.Repo, commit_hash: str, candidate_branches: List[str]
+    ) -> Optional[str]:
+        """Tenta associar o commit a uma branch caso a mensagem mencione o número da tarefa/issue."""
+        try:
+            msg = repo.commit(commit_hash).message
+            m_issue = re.search(r"#?(\d{5,7})", msg)
+            if m_issue:
+                issue_num = m_issue.group(1)
+                for b in candidate_branches:
+                    if issue_num in b:
+                        return b
+        except Exception:
+            pass
+        return None
+
+    @classmethod
+    def _resolver_branch_por_proximidade(
+        cls,
+        repo: git.Repo,
+        commit_hash: str,
+        active: str,
+        raw_local: List[str],
+        raw_rem: List[str],
+    ) -> Optional[str]:
+        """Resolve a branch por proximidade com a ativa ou pela menor distância topológica no grafo."""
+        # 1. Proximidade com branch ativa (se for ancestral direta em até 10 commits)
+        if active and active in raw_local:
+            try:
+                dist = int(repo.git.rev_list("--count", f"{commit_hash}..{active}"))
+                if dist <= 10:
+                    return active
+            except Exception:
+                pass
+
+        # 2. Pool de candidatos priorizando branches locais e de releases/hotfix/feature
+        candidate_pool = raw_local + [
+            b for b in raw_rem if b.startswith("releases/") or b.startswith("hotfix/") or b.startswith("feature/")
+        ]
+        if not candidate_pool:
+            candidate_pool = raw_local + raw_rem
+
+        best_branch = ""
+        min_distance = float("inf")
+        for b in candidate_pool[:20]:
+            try:
+                dist = int(repo.git.rev_list("--count", f"{commit_hash}..{b}"))
+                if dist < min_distance:
+                    min_distance = dist
+                    best_branch = b
+            except Exception:
+                pass
+
+        return best_branch or None
 
     @classmethod
     def get_commit_branch(cls, repo_path: str | Path, commit_hash: str) -> str:
-        """Resolve the primary origin branch containing this commit (issue matching, active if near, or closest topological branch)."""
+        """Resolve a branch de origem principal contendo este commit (tarefa, proximidade ou distância topológica)."""
         if not commit_hash:
             return ""
         if commit_hash in cls._COMMIT_BRANCH_CACHE:
             return cls._COMMIT_BRANCH_CACHE[commit_hash]
 
         path = Path(repo_path).resolve()
+        branch_escolhida = ""
+
         try:
             repo = git.Repo(path)
-            active = ""
-            if not repo.head.is_detached:
-                try:
-                    active = cls.decode_git_path(repo.active_branch.name)
-                except Exception:
-                    pass
+            active, raw_local, raw_rem = cls._obter_branches_contendo_commit(repo, commit_hash)
 
-            raw_local: List[str] = []
-            try:
-                raw_local = [cls.decode_git_path(b.strip("* ").strip()) for b in repo.git.branch("--contains", commit_hash).splitlines() if b.strip()]
-            except Exception:
-                pass
+            # Heurística 1: Número de tarefa/issue na mensagem do commit
+            branch_escolhida = (
+                cls._resolver_branch_por_tarefa(repo, commit_hash, raw_local)
+                or cls._resolver_branch_por_tarefa(repo, commit_hash, raw_rem)
+                or ""
+            )
 
-            raw_rem: List[str] = []
-            try:
-                raw_rem = [
-                    cls.decode_git_path(b.strip().replace("origin/", ""))
-                    for b in repo.git.branch("-r", "--contains", commit_hash).splitlines()
-                    if b.strip() and "HEAD" not in b
-                ]
-            except Exception:
-                pass
+            # Heurísticas 2 e 3: Proximidade com branch ativa ou menor distância topológica
+            if not branch_escolhida:
+                branch_escolhida = cls._resolver_branch_por_proximidade(
+                    repo=repo,
+                    commit_hash=commit_hash,
+                    active=active,
+                    raw_local=raw_local,
+                    raw_rem=raw_rem,
+                ) or ""
 
-            # 1. Check if commit message contains a task/issue number matching a branch name
-            try:
-                msg = repo.commit(commit_hash).message
-                m_issue = re.search(r"#?(\d{5,7})", msg)
-                if m_issue:
-                    issue_num = m_issue.group(1)
-                    for b in raw_local:
-                        if issue_num in b:
-                            cls._COMMIT_BRANCH_CACHE[commit_hash] = b
-                            return b
-                    for b in raw_rem:
-                        if issue_num in b:
-                            cls._COMMIT_BRANCH_CACHE[commit_hash] = b
-                            return b
-            except Exception:
-                pass
+            # Fallback: primeira branch local ou remota que contém o commit
+            if not branch_escolhida:
+                branch_escolhida = raw_local[0] if raw_local else (raw_rem[0] if raw_rem else "")
 
-            # 2. Check if active branch is immediate ancestor (within 10 commits)
-            if active and active in raw_local:
-                try:
-                    dist = int(repo.git.rev_list("--count", f"{commit_hash}..{active}"))
-                    if dist <= 10:
-                        cls._COMMIT_BRANCH_CACHE[commit_hash] = active
-                        return active
-                except Exception:
-                    pass
-
-            # 3. Find closest branch by topological distance (preferring local and release/feature branches)
-            candidate_pool = raw_local + [b for b in raw_rem if b.startswith("releases/") or b.startswith("hotfix/") or b.startswith("feature/")]
-            if not candidate_pool:
-                candidate_pool = raw_local + raw_rem
-
-            best_branch = ""
-            min_distance = float("inf")
-            for b in candidate_pool[:20]:
-                try:
-                    dist = int(repo.git.rev_list("--count", f"{commit_hash}..{b}"))
-                    if dist < min_distance:
-                        min_distance = dist
-                        best_branch = b
-                except Exception:
-                    pass
-
-            if best_branch:
-                cls._COMMIT_BRANCH_CACHE[commit_hash] = best_branch
-                return best_branch
-
-            if raw_local:
-                chosen = raw_local[0]
-                cls._COMMIT_BRANCH_CACHE[commit_hash] = chosen
-                return chosen
-
-            if raw_rem:
-                chosen = raw_rem[0]
-                cls._COMMIT_BRANCH_CACHE[commit_hash] = chosen
-                return chosen
         except Exception:
             pass
 
-        cls._COMMIT_BRANCH_CACHE[commit_hash] = ""
-        return ""
+        cls._COMMIT_BRANCH_CACHE[commit_hash] = branch_escolhida
+        return branch_escolhida
+
+    @staticmethod
+    def _normalizar_datetime_utc(dt: Optional[datetime]) -> Optional[datetime]:
+        """Normaliza datetime ingênuo para fuso UTC consciente."""
+        if dt is None:
+            return None
+        return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt
+
+    @classmethod
+    def _obter_iterador_commits(
+        cls,
+        repo: git.Repo,
+        branch: Optional[str] = None,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
+        author: Optional[str] = None,
+    ) -> Any:
+        """Cria e configura o iterador de commits do Git com resolução de branch e fallbacks."""
+        clean_b = (branch or "").strip()
+        if clean_b and clean_b.upper() not in ["ALL", "TODAS"]:
+            iter_kwargs: Dict[str, Any] = {"rev": clean_b}
+        else:
+            iter_kwargs: Dict[str, Any] = {"all": True}
+
+        if start_date is not None:
+            iter_kwargs["since"] = int(start_date.timestamp())
+        if end_date is not None:
+            iter_kwargs["until"] = int(end_date.timestamp())
+        if author:
+            iter_kwargs["author"] = author.strip()
+
+        try:
+            return repo.iter_commits(**iter_kwargs)
+        except Exception as iter_err:
+            logger.warning(
+                f"Branch '{clean_b}' não pôde ser iterada diretamente ({iter_err}). Buscando com all=True."
+            )
+            iter_kwargs.pop("rev", None)
+            iter_kwargs["all"] = True
+            return repo.iter_commits(**iter_kwargs)
 
     @classmethod
     def _montar_dados_commit(
@@ -680,36 +784,21 @@ class GitService:
 
         repo = git.Repo(path)
 
-        start_date_tz = None
-        if start_date is not None:
-            start_date_tz = start_date.replace(tzinfo=timezone.utc) if start_date.tzinfo is None else start_date
-
-        end_date_tz = None
-        if end_date is not None:
-            end_date_tz = end_date.replace(tzinfo=timezone.utc) if end_date.tzinfo is None else end_date
-
+        start_date_tz = cls._normalizar_datetime_utc(start_date)
+        end_date_tz = cls._normalizar_datetime_utc(end_date)
+        clean_b = (branch or "").strip()
         commits_found: List[Dict[str, Any]] = []
 
         try:
-            clean_b = (branch or "").strip()
-            if clean_b and clean_b.upper() not in ["ALL", "TODAS"]:
-                iter_kwargs: Dict[str, Any] = {"rev": clean_b}
-            else:
-                iter_kwargs: Dict[str, Any] = {"all": True}
-            if start_date_tz is not None:
-                iter_kwargs["since"] = int(start_date_tz.timestamp())
-            if end_date_tz is not None:
-                iter_kwargs["until"] = int(end_date_tz.timestamp())
-
-            try:
-                commit_iter = repo.iter_commits(**iter_kwargs)
-            except Exception as iter_err:
-                logger.warning(f"Branch '{clean_b}' não pôde ser iterada diretamente ({iter_err}). Buscando com all=True.")
-                iter_kwargs.pop("rev", None)
-                iter_kwargs["all"] = True
-                commit_iter = repo.iter_commits(**iter_kwargs)
+            commit_iter = cls._obter_iterador_commits(
+                repo=repo,
+                branch=clean_b,
+                start_date=start_date_tz,
+                end_date=end_date_tz,
+            )
 
             for commit in commit_iter:
+
                 commit_dt = commit.committed_datetime
 
                 # Safety check against time boundaries
@@ -803,35 +892,21 @@ class GitService:
 
         # 2. Iterate commits directly from Git
         clean_b = (branch or "").strip()
-        if clean_b and clean_b.upper() not in ["ALL", "TODAS"]:
-            iter_kwargs: Dict[str, Any] = {"rev": clean_b}
-        else:
-            iter_kwargs: Dict[str, Any] = {"all": True}
-        start_date_tz = None
-        if start_date is not None:
-            start_date_tz = start_date.replace(tzinfo=timezone.utc) if start_date.tzinfo is None else start_date
-            iter_kwargs["since"] = int(start_date_tz.timestamp())
-
-        end_date_tz = None
-        if end_date is not None:
-            end_date_tz = end_date.replace(tzinfo=timezone.utc) if end_date.tzinfo is None else end_date
-            iter_kwargs["until"] = int(end_date_tz.timestamp())
-
-        if author:
-            iter_kwargs["author"] = author.strip()
+        start_date_tz = cls._normalizar_datetime_utc(start_date)
+        end_date_tz = cls._normalizar_datetime_utc(end_date)
 
         matched_commits: List[Dict[str, Any]] = []
         has_more = False
         skipped = 0
         query_text = q.strip().lower() if q else ""
 
-        try:
-            commit_iter = repo.iter_commits(**iter_kwargs)
-        except Exception as iter_err:
-            logger.warning(f"Branch '{clean_b}' não pôde ser iterada diretamente ({iter_err}). Buscando com all=True.")
-            iter_kwargs.pop("rev", None)
-            iter_kwargs["all"] = True
-            commit_iter = repo.iter_commits(**iter_kwargs)
+        commit_iter = cls._obter_iterador_commits(
+            repo=repo,
+            branch=clean_b,
+            start_date=start_date_tz,
+            end_date=end_date_tz,
+            author=author,
+        )
 
         for commit in commit_iter:
             commit_dt = commit.committed_datetime
@@ -875,6 +950,7 @@ class GitService:
                 analyze_xml=analyze_xml,
             )
             matched_commits.append(dados_commit)
+
 
         return matched_commits, has_more
 

@@ -34,6 +34,73 @@ function initCommitsStore() {
   }
 }
 
+// ============================================================================
+// 1. UTILITÁRIOS PUROS E FORMATADORES
+// ============================================================================
+
+/**
+ * Escape string for safe insertion into HTML (XSS prevention)
+ */
+function escapeHtml(str) {
+  if (!str) return "";
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+/**
+ * Decode Git octal escaped paths (e.g. \303\255 -> í)
+ */
+function decodeGitPath(path) {
+  if (!path) return "";
+  let clean = String(path).replace(/^["']|["']$/g, "");
+  if (clean.includes("\\")) {
+    try {
+      clean = clean.replace(/\\([0-7]{3})/g, (match, octal) => String.fromCharCode(parseInt(octal, 8)));
+      clean = decodeURIComponent(escape(clean));
+    } catch (e) { }
+  }
+  return clean;
+}
+
+/**
+ * Format Date to YYYY-MM-DDTHH:MM for datetime-local inputs
+ */
+function formatDatetimeLocal(date) {
+  if (!date || !(date instanceof Date) || isNaN(date)) return "";
+  const pad = (n) => String(n).padStart(2, "0");
+  const yyyy = date.getFullYear();
+  const mm = pad(date.getMonth() + 1);
+  const dd = pad(date.getDate());
+  const hh = pad(date.getHours());
+  const min = pad(date.getMinutes());
+  return `${yyyy}-${mm}-${dd}T${hh}:${min}`;
+}
+
+/**
+ * Helper seguro para cópia para área de transferência com feedback visual no botão
+ */
+async function copyTextToClipboardWithFeedback(text, btn, successFeedback = "") {
+  if (!text) return false;
+  try {
+    await navigator.clipboard.writeText(text);
+    if (btn) {
+      const origHtml = btn.innerHTML;
+      btn.innerHTML = `<i class="bi bi-check2 text-success"></i>${successFeedback ? ` ${successFeedback}` : ""}`;
+      setTimeout(() => {
+        btn.innerHTML = origHtml;
+      }, 1500);
+    }
+    return true;
+  } catch (err) {
+    console.error("Falha ao copiar para a área de transferência:", err);
+    return false;
+  }
+}
+
 /**
  * Configuration & Definition of Visible Columns in Commits Tables
  */
@@ -121,7 +188,7 @@ function toggleAllTableColumns(visible) {
 function resetTableColumns() {
   try {
     localStorage.removeItem(COLUMNS_STORAGE_KEY);
-  } catch (e) {}
+  } catch (e) { }
   applyTableColumnVisibility();
 }
 
@@ -262,19 +329,6 @@ async function viewFilesByHash(commitHash) {
 }
 
 /**
- * Format Date to YYYY-MM-DDTHH:MM for datetime-local inputs
- */
-function formatDatetimeLocal(date) {
-  const pad = (n) => String(n).padStart(2, '0');
-  const yyyy = date.getFullYear();
-  const mm = pad(date.getMonth() + 1);
-  const dd = pad(date.getDate());
-  const hh = pad(date.getHours());
-  const min = pad(date.getMinutes());
-  return `${yyyy}-${mm}-${dd}T${hh}:${min}`;
-}
-
-/**
  * Quick date filter buttons logic
  */
 function setupQuickFilters() {
@@ -338,19 +392,9 @@ function setupQuickFilters() {
  */
 function setupClipboardCopy() {
   document.querySelectorAll(".copy-btn").forEach((btn) => {
-    btn.addEventListener("click", async () => {
+    btn.addEventListener("click", () => {
       const text = btn.dataset.copy;
-      if (!text) return;
-      try {
-        await navigator.clipboard.writeText(text);
-        const originalHtml = btn.innerHTML;
-        btn.innerHTML = '<i class="bi bi-check2 text-success"></i>';
-        setTimeout(() => {
-          btn.innerHTML = originalHtml;
-        }, 1500);
-      } catch (err) {
-        console.error("Falha ao copiar:", err);
-      }
+      copyTextToClipboardWithFeedback(text, btn);
     });
   });
 }
@@ -382,7 +426,7 @@ function viewFiles(commitHash, filesJson, commitData) {
   if (!modalTitle || !modalBody) return;
 
   modalTitle.textContent = `Arquivos Alterados (${commitHash.substring(0, 7)})`;
-  
+
   let files = [];
   try {
     files = typeof filesJson === "string" ? JSON.parse(filesJson) : filesJson;
@@ -543,18 +587,6 @@ function viewFiles(commitHash, filesJson, commitData) {
     const modal = new bootstrap.Modal(modalEl);
     modal.show();
   }
-}
-
-function decodeGitPath(path) {
-  if (!path) return "";
-  let clean = String(path).replace(/^["']|["']$/g, "");
-  if (clean.includes("\\")) {
-    try {
-      clean = clean.replace(/\\([0-7]{3})/g, (match, octal) => String.fromCharCode(parseInt(octal, 8)));
-      clean = decodeURIComponent(escape(clean));
-    } catch (e) {}
-  }
-  return clean;
 }
 
 function findFlowMetricsForFile(path, flows) {
@@ -822,6 +854,106 @@ function verificarSeNaturezaJaCriada(commit, natureza) {
 }
 
 /**
+ * Retorna os metadados visuais e de atividade do Redmine para a natureza ('fluxo' ou 'sql')
+ */
+function getNatureActivityInfo(isSql) {
+  if (isSql) {
+    return {
+      key: "sql",
+      label: "BANCO DE DADOS (SQL)",
+      activity: "Desenvolvimento - Criar/Manter scripts para extração de dados do banco de dados",
+      badgeClass: "badge text-dark fw-bold",
+      badgeBg: "#22d3ee",
+      rulesTitle: "Scripts SQL (Banco de Dados)",
+      subtitle: "Casos de Uso e Operações DML/DDL identificados nos scripts .sql:",
+    };
+  }
+  return {
+    key: "fluxo",
+    label: "CATÁLOGO / FLUXO (XML)",
+    activity: "Desenvolvimento - Criar/Manter tarefa de automação",
+    badgeClass: "badge bg-warning text-dark fw-bold",
+    badgeBg: "",
+    rulesTitle: "Regras do Catálogo (PJE)",
+    subtitle: "Detalhamento das tags XML calculadas (Adições / Remoções - excluindo estruturais):",
+  };
+}
+
+/**
+ * Resolve a quantidade sugerida, descrição padrão e Redmine ID da natureza selecionada
+ */
+function getCommitNatureData(commit, isSql) {
+  const hasXml = commit.has_xml_changes || commit.xml_files_count > 0;
+  const hasSql = commit.has_sql_changes || commit.sql_files_count > 0;
+  const hasBoth = commit.tem_ambos_ajustes || (hasXml && hasSql);
+
+  let currentRedmineId = isSql ? commit.redmine_id_sql : commit.redmine_id_fluxo;
+  if (!currentRedmineId && !hasBoth) {
+    currentRedmineId = commit.redmine_id;
+  }
+
+  let quantity = 1;
+  let description = "";
+
+  if (isSql) {
+    const sqlIcs = (commit.ic_count_sql && commit.ic_count_sql > 0) ? commit.ic_count_sql : (commit.has_sql_changes ? 1 : 1);
+    quantity = sqlIcs > 0 ? sqlIcs : 1;
+    description = commit._edited_desc_sql || commit.ic_description_sql || commit.ic_description || "";
+  } else {
+    const xmlIcs = (commit.ic_count_xml && commit.ic_count_xml > 0)
+      ? commit.ic_count_xml
+      : ((commit.ic_count && commit.ic_count > 0) ? commit.ic_count : (commit.xml_files_count || 1));
+    quantity = xmlIcs > 0 ? xmlIcs : 1;
+    description = commit._edited_desc_fluxo || commit.ic_description_fluxo || commit.ic_description || "";
+  }
+
+  return {
+    redmineId: currentRedmineId || "",
+    quantity,
+    description,
+    isCreated: verificarSeNaturezaJaCriada(commit, isSql ? "sql" : "fluxo"),
+  };
+}
+
+/**
+ * Renderiza o detalhamento de casos de uso e operações DML/DDL de scripts SQL no modal
+ */
+function renderSqlScriptsBreakdownHtml(commit, totalIcs) {
+  const sqlMetrics = commit.sql_scripts_metrics || {};
+  const scripts = sqlMetrics.scripts || [];
+  if (!scripts.length) {
+    return `<div class="p-2 rounded bg-dark bg-opacity-50 border border-secondary border-opacity-25"><span class="badge text-dark fw-bold" style="background:#22d3ee;"><i class="bi bi-database me-1"></i>Ajuste em scripts SQL detectado</span></div>`;
+  }
+
+  let html = "";
+  scripts.forEach((sc) => {
+    html += `<div class="p-2 mb-2 rounded bg-dark bg-opacity-50 border border-secondary border-opacity-25 w-100">`;
+    html += `<div class="fw-semibold text-info small mb-1 d-flex align-items-center justify-content-between"><span><i class="bi bi-filetype-sql me-1"></i>Script: <span class="text-light">${escapeHtml(sc.nome_arquivo || "")}</span></span><span class="badge text-dark fw-bold" style="background:#22d3ee;">${sc.total_ics || 1} ICs</span></div>`;
+    const casos = sc.casos_de_uso || [];
+    if (casos.length > 0) {
+      html += `<div class="mb-1 text-light small"><span class="text-muted small">Casos de Uso:</span></div>`;
+      html += `<div class="d-flex flex-wrap gap-1 mb-1">`;
+      casos.forEach(c => {
+        html += `<span class="badge bg-info bg-opacity-25 text-info border border-info-subtle fw-semibold px-2 py-1"><i class="bi bi-check2 me-1"></i>${escapeHtml(c)}</span>`;
+      });
+      html += `</div>`;
+    }
+    const ops = sc.operacoes || {};
+    const opBadges = [];
+    for (const [op, cnt] of Object.entries(ops)) {
+      if (cnt > 0) {
+        opBadges.push(`<span class="badge bg-secondary-subtle text-light border border-secondary-subtle small">${escapeHtml(op)}: ${cnt}</span>`);
+      }
+    }
+    if (opBadges.length > 0) {
+      html += `<div class="d-flex flex-wrap gap-1 mt-1">${opBadges.join(" ")}</div>`;
+    }
+    html += `</div>`;
+  });
+  return html;
+}
+
+/**
  * Render the modal contents dynamically according to window.currentICNature ('fluxo' vs 'sql')
  */
 function renderModalForCurrentNature() {
@@ -846,6 +978,8 @@ function renderModalForCurrentNature() {
   const subtitleEl = document.getElementById("icBreakdownSubtitle");
 
   const isSql = window.currentICNature === 'sql';
+  const info = getNatureActivityInfo(isSql);
+  const data = getCommitNatureData(commit, isSql);
 
   // Toggle button styling for active nature
   if (btnFluxo && btnSql) {
@@ -860,58 +994,41 @@ function renderModalForCurrentNature() {
     }
   }
 
-  // Activity strings per nature
-  const actFluxo = "Desenvolvimento - Criar/Manter tarefa de automação";
-  const actSql = "Desenvolvimento - Criar/Manter scripts para extração de dados do banco de dados";
-  if (inputNatureza) inputNatureza.value = isSql ? "sql" : "fluxo";
-  if (inputActivity) inputActivity.value = isSql ? actSql : actFluxo;
-  if (displayActivity) displayActivity.textContent = isSql ? actSql : actFluxo;
+  // Update activity and nature badges
+  if (inputNatureza) inputNatureza.value = info.key;
+  if (inputActivity) inputActivity.value = info.activity;
+  if (displayActivity) displayActivity.textContent = info.activity;
 
   if (natureBadge) {
-    if (isSql) {
-      natureBadge.className = "badge text-dark fw-bold";
-      natureBadge.style.backgroundColor = "#22d3ee";
-      natureBadge.textContent = "BANCO DE DADOS (SQL)";
-    } else {
-      natureBadge.className = "badge bg-warning text-dark fw-bold";
-      natureBadge.style.backgroundColor = "";
-      natureBadge.textContent = "CATÁLOGO / FLUXO (XML)";
-    }
+    natureBadge.className = info.badgeClass;
+    natureBadge.style.backgroundColor = info.badgeBg;
+    natureBadge.textContent = info.label;
   }
 
-  // Determine Redmine ID for this active nature
-  const hasXml = commit.has_xml_changes || commit.xml_files_count > 0;
-  const hasSql = commit.has_sql_changes || commit.sql_files_count > 0;
-  const hasBoth = commit.tem_ambos_ajustes || (hasXml && hasSql);
+  if (redmineIdEl) redmineIdEl.value = data.redmineId;
+  if (quantityEl) quantityEl.value = data.quantity;
+  if (descEl) descEl.value = data.description;
 
-  let currentRedmineId = isSql ? commit.redmine_id_sql : commit.redmine_id_fluxo;
-  if (!currentRedmineId && !hasBoth) {
-    currentRedmineId = commit.redmine_id;
-  }
-  if (redmineIdEl) redmineIdEl.value = currentRedmineId || "";
-
-  const isCurrentNatureCreated = verificarSeNaturezaJaCriada(commit, isSql ? 'sql' : 'fluxo');
-
-  // Redmine button state: adapts to the active tab (Fluxo vs SQL)
+  // Redmine button state
   if (redmineBtn) {
-    if (isCurrentNatureCreated) {
+    if (data.isCreated) {
       redmineBtn.className = "btn btn-success d-flex align-items-center gap-1";
       redmineBtn.style.backgroundColor = "";
-      redmineBtn.innerHTML = `<i class="bi bi-box-arrow-up-right"></i> Redmine #${currentRedmineId}`;
+      redmineBtn.innerHTML = `<i class="bi bi-box-arrow-up-right"></i> Redmine #${data.redmineId}`;
       redmineBtn.disabled = false;
-      redmineBtn.onclick = () => window.open(`https://redmine.tjce.jus.br/issues/${currentRedmineId}`, '_blank');
+      redmineBtn.onclick = () => window.open(`https://redmine.tjce.jus.br/issues/${data.redmineId}`, '_blank');
     } else {
       redmineBtn.className = "btn btn-warning text-dark fw-bold d-flex align-items-center gap-1";
       redmineBtn.style.backgroundColor = "";
       redmineBtn.innerHTML = '<i class="bi bi-cloud-arrow-up-fill"></i> Criar no Redmine';
       redmineBtn.disabled = false;
-      redmineBtn.onclick = function() { criarItemCatalogoNoRedmine(this, false); };
+      redmineBtn.onclick = function () { criarItemCatalogoNoRedmine(this, false); };
     }
   }
 
-  // Simulation button: only visible/enabled if current nature is NOT created yet
+  // Simulation button state
   if (simBtn) {
-    if (isCurrentNatureCreated) {
+    if (data.isCreated) {
       simBtn.classList.add("d-none");
       simBtn.disabled = true;
     } else {
@@ -919,71 +1036,22 @@ function renderModalForCurrentNature() {
       simBtn.disabled = false;
       simBtn.className = "btn btn-outline-warning d-flex align-items-center gap-1";
       simBtn.innerHTML = '<i class="bi bi-shield-check"></i> Testar no Redmine (Simulação)';
-      simBtn.onclick = function() { criarItemCatalogoNoRedmine(this, true); };
+      simBtn.onclick = function () { criarItemCatalogoNoRedmine(this, true); };
     }
   }
 
-  // Quantity and Description for this nature
-  if (isSql) {
-    const sqlIcs = (commit.ic_count_sql && commit.ic_count_sql > 0) ? commit.ic_count_sql : (commit.has_sql_changes ? 1 : 1);
-    if (quantityEl) quantityEl.value = sqlIcs > 0 ? sqlIcs : 1;
-    if (descEl) descEl.value = commit._edited_desc_sql || commit.ic_description_sql || commit.ic_description || "";
+  // Details Breakdown Alert
+  if (tagsAlert && countText && tagsDetail && rulesBadge && subtitleEl) {
+    rulesBadge.textContent = info.rulesTitle;
+    rulesBadge.className = info.badgeClass;
+    rulesBadge.style.backgroundColor = info.badgeBg;
+    subtitleEl.textContent = info.subtitle;
 
-    if (tagsAlert && countText && tagsDetail && rulesBadge && subtitleEl) {
+    if (isSql) {
       tagsAlert.classList.remove("d-none");
-      rulesBadge.textContent = "Scripts SQL (Banco de Dados)";
-      rulesBadge.className = "badge text-dark fw-bold";
-      rulesBadge.style.backgroundColor = "#22d3ee";
-      subtitleEl.textContent = "Casos de Uso e Operações DML/DDL identificados nos scripts .sql:";
-
-      const sqlMetrics = commit.sql_scripts_metrics || {};
-      const scripts = sqlMetrics.scripts || [];
-      const totalIcs = sqlMetrics.total_ics || sqlIcs;
-      countText.textContent = `${totalIcs} IC(s) de Banco de Dados calculados`;
-
-      let html = "";
-      if (scripts.length > 0) {
-        scripts.forEach((sc) => {
-          html += `<div class="p-2 mb-2 rounded bg-dark bg-opacity-50 border border-secondary border-opacity-25 w-100">`;
-          html += `<div class="fw-semibold text-info small mb-1 d-flex align-items-center justify-content-between"><span><i class="bi bi-filetype-sql me-1"></i>Script: <span class="text-light">${escapeHtml(sc.nome_arquivo || "")}</span></span><span class="badge text-dark fw-bold" style="background:#22d3ee;">${sc.total_ics || 1} ICs</span></div>`;
-          const casos = sc.casos_de_uso || [];
-          if (casos.length > 0) {
-            html += `<div class="mb-1 text-light small"><span class="text-muted small">Casos de Uso:</span></div>`;
-            html += `<div class="d-flex flex-wrap gap-1 mb-1">`;
-            casos.forEach(c => {
-              html += `<span class="badge bg-info bg-opacity-25 text-info border border-info-subtle fw-semibold px-2 py-1"><i class="bi bi-check2 me-1"></i>${escapeHtml(c)}</span>`;
-            });
-            html += `</div>`;
-          }
-          const ops = sc.operacoes || {};
-          const opBadges = [];
-          for (const [op, cnt] of Object.entries(ops)) {
-            if (cnt > 0) {
-              opBadges.push(`<span class="badge bg-secondary-subtle text-light border border-secondary-subtle small">${escapeHtml(op)}: ${cnt}</span>`);
-            }
-          }
-          if (opBadges.length > 0) {
-            html += `<div class="d-flex flex-wrap gap-1 mt-1">${opBadges.join(" ")}</div>`;
-          }
-          html += `</div>`;
-        });
-      } else {
-        html = `<div class="p-2 rounded bg-dark bg-opacity-50 border border-secondary border-opacity-25"><span class="badge text-dark fw-bold" style="background:#22d3ee;"><i class="bi bi-database me-1"></i>Ajuste em scripts SQL detectado</span></div>`;
-      }
-      tagsDetail.innerHTML = html;
-    }
-  } else {
-    // Fluxo XML
-    const xmlIcs = (commit.ic_count_xml && commit.ic_count_xml > 0) ? commit.ic_count_xml : ((commit.ic_count && commit.ic_count > 0) ? commit.ic_count : (commit.xml_files_count || 1));
-    if (quantityEl) quantityEl.value = xmlIcs > 0 ? xmlIcs : 1;
-    if (descEl) descEl.value = commit._edited_desc_fluxo || commit.ic_description_fluxo || commit.ic_description || "";
-
-    if (tagsAlert && countText && tagsDetail && rulesBadge && subtitleEl) {
-      rulesBadge.textContent = "Regras do Catálogo (PJE)";
-      rulesBadge.className = "badge bg-warning text-dark fw-bold";
-      rulesBadge.style.backgroundColor = "";
-      subtitleEl.textContent = "Detalhamento das tags XML calculadas (Adições / Remoções - excluindo estruturais):";
-
+      countText.textContent = `${data.quantity} IC(s) de Banco de Dados calculados`;
+      tagsDetail.innerHTML = renderSqlScriptsBreakdownHtml(commit, data.quantity);
+    } else {
       renderXmlTagsDetail(commit, tagsAlert, countText, tagsDetail);
     }
   }
@@ -1115,17 +1183,8 @@ function openCreateICModal(commitData, defaultNature = null) {
 async function copyModalField(fieldId, btn) {
   const field = document.getElementById(fieldId);
   if (!field) return;
-
-  try {
-    await navigator.clipboard.writeText(field.value);
-    const origHtml = btn.innerHTML;
-    btn.innerHTML = '<i class="bi bi-check2 text-success"></i> Copiado!';
-    setTimeout(() => {
-      btn.innerHTML = origHtml;
-    }, 1500);
-  } catch (err) {
-    console.error("Erro ao copiar campo:", err);
-  }
+  const text = field.value || field.innerText || "";
+  await copyTextToClipboardWithFeedback(text, btn, "Copiado!");
 }
 
 /**
@@ -1166,8 +1225,8 @@ async function copyFullICToRedmine(btn) {
     if (alertEl && alertText) {
       alertEl.classList.remove("d-none", "alert-danger");
       alertEl.classList.add("alert-success");
-      alertText.textContent = hasBoth 
-        ? "Títulos e descrições dos 2 Redmines copiados com sucesso!" 
+      alertText.textContent = hasBoth
+        ? "Títulos e descrições dos 2 Redmines copiados com sucesso!"
         : "Título e descrição copiados com sucesso! Cole diretamente no Redmine.";
     }
   } catch (err) {
@@ -1178,6 +1237,59 @@ async function copyFullICToRedmine(btn) {
 /**
  * Update the status badge in the commits table
  */
+/**
+ * Renderiza as badges de status do commit na tabela (Redmines, Salvo, Pendente)
+ */
+function renderCommitStatusBadgeHtml(c) {
+  if (!c) return "";
+  const temAmbos = c.tem_ambos_ajustes || (c.has_xml_changes && c.has_sql_changes);
+  if (temAmbos) {
+    const flx = c.redmine_id_fluxo
+      ? `<a href="https://redmine.tjce.jus.br/issues/${c.redmine_id_fluxo}" target="_blank" class="badge bg-warning text-dark fw-bold text-decoration-none d-inline-flex align-items-center gap-1" title="Redmine de Fluxo (.xml)"><i class="bi bi-diagram-3-fill"></i> #${c.redmine_id_fluxo}</a>`
+      : (c.is_saved_fluxo
+        ? `<span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle d-inline-flex align-items-center gap-1" title="Fluxo salvo no banco de dados"><i class="bi bi-diagram-3"></i> Fluxo Salvo</span>`
+        : `<span class="badge bg-secondary-subtle text-muted border border-secondary-subtle d-inline-flex align-items-center gap-1" title="Fluxo pendente"><i class="bi bi-diagram-3"></i> Fluxo Pendente</span>`);
+
+    const sql = c.redmine_id_sql
+      ? `<a href="https://redmine.tjce.jus.br/issues/${c.redmine_id_sql}" target="_blank" class="badge text-dark fw-bold text-decoration-none d-inline-flex align-items-center gap-1" style="background-color: #22d3ee;" title="Redmine de Scripts SQL (.sql)"><i class="bi bi-database-fill"></i> #${c.redmine_id_sql}</a>`
+      : (c.is_saved_sql
+        ? `<span class="badge text-info border border-info-subtle d-inline-flex align-items-center gap-1" style="background-color: rgba(34, 211, 238, 0.15);" title="SQL salvo no banco de dados"><i class="bi bi-database"></i> SQL Salvo</span>`
+        : `<span class="badge bg-secondary-subtle text-muted border border-secondary-subtle d-inline-flex align-items-center gap-1" title="SQL pendente"><i class="bi bi-database"></i> SQL Pendente</span>`);
+
+    return `<div class="d-flex flex-column gap-1 align-items-center">${flx}${sql}</div>`;
+  }
+
+  if (c.has_xml_changes) {
+    const rId = c.redmine_id_fluxo || c.redmine_id;
+    if (rId) {
+      return `<a href="https://redmine.tjce.jus.br/issues/${rId}" target="_blank" class="badge bg-warning text-dark fw-bold text-decoration-none d-inline-flex align-items-center gap-1" title="Redmine de Fluxo (.xml)"><i class="bi bi-diagram-3-fill"></i> #${rId}</a>`;
+    }
+    if (c.is_saved_fluxo || c.is_saved) {
+      return `<span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle d-inline-flex align-items-center gap-1" title="Fluxo salvo no PostgreSQL"><i class="bi bi-diagram-3 me-1"></i>Fluxo Salvo</span>`;
+    }
+    return `<span class="badge bg-secondary-subtle text-muted border border-secondary-subtle d-inline-flex align-items-center gap-1" title="Fluxo pendente"><i class="bi bi-diagram-3 me-1"></i>Fluxo Pendente</span>`;
+  }
+
+  if (c.has_sql_changes) {
+    const rId = c.redmine_id_sql || c.redmine_id;
+    if (rId) {
+      return `<a href="https://redmine.tjce.jus.br/issues/${rId}" target="_blank" class="badge text-dark fw-bold text-decoration-none d-inline-flex align-items-center gap-1" style="background-color: #22d3ee;" title="Redmine de Scripts SQL (.sql)"><i class="bi bi-database-fill"></i> #${rId}</a>`;
+    }
+    if (c.is_saved_sql || c.is_saved) {
+      return `<span class="badge text-info border border-info-subtle d-inline-flex align-items-center gap-1" style="background-color: rgba(34, 211, 238, 0.15);" title="SQL salvo no PostgreSQL"><i class="bi bi-database me-1"></i>SQL Salvo</span>`;
+    }
+    return `<span class="badge bg-secondary-subtle text-muted border border-secondary-subtle d-inline-flex align-items-center gap-1" title="SQL pendente"><i class="bi bi-database me-1"></i>SQL Pendente</span>`;
+  }
+
+  if (c.redmine_id) {
+    return `<a href="https://redmine.tjce.jus.br/issues/${c.redmine_id}" target="_blank" class="badge bg-success text-decoration-none d-inline-flex align-items-center gap-1" title="Abrir tarefa no Redmine"><i class="bi bi-check-circle-fill"></i> #${c.redmine_id}</a>`;
+  }
+  if (c.is_saved) {
+    return `<span class="badge bg-success-subtle text-success border border-success-subtle" title="Item de Catálogo já salvo no PostgreSQL"><i class="bi bi-check-circle-fill me-1"></i>Salvo</span>`;
+  }
+  return `<span class="badge bg-secondary-subtle text-muted border border-secondary-subtle" title="Sem alterações de Fluxo ou SQL">Sem IC</span>`;
+}
+
 /**
  * Update the status badge in the commits table (supports dual Redmines)
  */
@@ -1200,54 +1312,7 @@ function updateTableStatusCell(commit) {
   }
   if (!cell) return;
 
-  const temAmbos = commit.tem_ambos_ajustes || (commit.has_xml_changes && commit.has_sql_changes);
-  if (temAmbos) {
-    let fluxoHtml = "";
-    if (commit.redmine_id_fluxo) {
-      fluxoHtml = `<a href="https://redmine.tjce.jus.br/issues/${commit.redmine_id_fluxo}" target="_blank" class="badge bg-warning text-dark fw-bold text-decoration-none d-inline-flex align-items-center gap-1" title="Redmine de Fluxo (.xml)"><i class="bi bi-diagram-3-fill"></i> #${commit.redmine_id_fluxo}</a>`;
-    } else if (commit.is_saved_fluxo) {
-      fluxoHtml = `<span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle d-inline-flex align-items-center gap-1" title="Fluxo salvo no banco de dados"><i class="bi bi-diagram-3"></i> Fluxo Salvo</span>`;
-    } else {
-      fluxoHtml = `<span class="badge bg-secondary-subtle text-muted border border-secondary-subtle d-inline-flex align-items-center gap-1" title="Fluxo pendente"><i class="bi bi-diagram-3"></i> Fluxo Pendente</span>`;
-    }
-
-    let sqlHtml = "";
-    if (commit.redmine_id_sql) {
-      sqlHtml = `<a href="https://redmine.tjce.jus.br/issues/${commit.redmine_id_sql}" target="_blank" class="badge text-dark fw-bold text-decoration-none d-inline-flex align-items-center gap-1" style="background-color: #22d3ee;" title="Redmine de Scripts SQL (.sql)"><i class="bi bi-database-fill"></i> #${commit.redmine_id_sql}</a>`;
-    } else if (commit.is_saved_sql) {
-      sqlHtml = `<span class="badge text-info border border-info-subtle d-inline-flex align-items-center gap-1" style="background-color: rgba(34, 211, 238, 0.15);" title="SQL salvo no banco de dados"><i class="bi bi-database"></i> SQL Salvo</span>`;
-    } else {
-      sqlHtml = `<span class="badge bg-secondary-subtle text-muted border border-secondary-subtle d-inline-flex align-items-center gap-1" title="SQL pendente"><i class="bi bi-database"></i> SQL Pendente</span>`;
-    }
-
-    cell.innerHTML = `<div class="d-flex flex-column gap-1 align-items-center">${fluxoHtml}${sqlHtml}</div>`;
-  } else if (commit.has_xml_changes) {
-    const rId = commit.redmine_id_fluxo || commit.redmine_id;
-    if (rId) {
-      cell.innerHTML = `<a href="https://redmine.tjce.jus.br/issues/${rId}" target="_blank" class="badge bg-warning text-dark fw-bold text-decoration-none d-inline-flex align-items-center gap-1" title="Redmine de Fluxo (.xml)"><i class="bi bi-diagram-3-fill"></i> #${rId}</a>`;
-    } else if (commit.is_saved_fluxo || commit.is_saved) {
-      cell.innerHTML = `<span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle d-inline-flex align-items-center gap-1" title="Fluxo salvo no PostgreSQL"><i class="bi bi-diagram-3 me-1"></i>Fluxo Salvo</span>`;
-    } else {
-      cell.innerHTML = `<span class="badge bg-secondary-subtle text-muted border border-secondary-subtle d-inline-flex align-items-center gap-1" title="Fluxo pendente"><i class="bi bi-diagram-3 me-1"></i>Fluxo Pendente</span>`;
-    }
-  } else if (commit.has_sql_changes) {
-    const rId = commit.redmine_id_sql || commit.redmine_id;
-    if (rId) {
-      cell.innerHTML = `<a href="https://redmine.tjce.jus.br/issues/${rId}" target="_blank" class="badge text-dark fw-bold text-decoration-none d-inline-flex align-items-center gap-1" style="background-color: #22d3ee;" title="Redmine de Scripts SQL (.sql)"><i class="bi bi-database-fill"></i> #${rId}</a>`;
-    } else if (commit.is_saved_sql || commit.is_saved) {
-      cell.innerHTML = `<span class="badge text-info border border-info-subtle d-inline-flex align-items-center gap-1" style="background-color: rgba(34, 211, 238, 0.15);" title="SQL salvo no PostgreSQL"><i class="bi bi-database me-1"></i>SQL Salvo</span>`;
-    } else {
-      cell.innerHTML = `<span class="badge bg-secondary-subtle text-muted border border-secondary-subtle d-inline-flex align-items-center gap-1" title="SQL pendente"><i class="bi bi-database me-1"></i>SQL Pendente</span>`;
-    }
-  } else {
-    if (commit.redmine_id) {
-      cell.innerHTML = `<a href="https://redmine.tjce.jus.br/issues/${commit.redmine_id}" target="_blank" class="badge bg-success text-decoration-none d-inline-flex align-items-center gap-1" title="Abrir tarefa no Redmine"><i class="bi bi-check-circle-fill"></i> #${commit.redmine_id}</a>`;
-    } else if (commit.is_saved) {
-      cell.innerHTML = `<span class="badge bg-success-subtle text-success border border-success-subtle" title="Item de Catálogo já salvo no PostgreSQL"><i class="bi bi-check-circle-fill me-1"></i>Salvo</span>`;
-    } else {
-      cell.innerHTML = `<span class="badge bg-secondary-subtle text-muted border border-secondary-subtle" title="Sem alterações de Fluxo ou SQL">Sem IC</span>`;
-    }
-  }
+  cell.innerHTML = renderCommitStatusBadgeHtml(commit);
 }
 
 /**
@@ -1298,8 +1363,8 @@ async function criarItemCatalogoNoRedmine(elementoBotao, ehSimulacao = false) {
   // Proteção contextual: Se a natureza da aba ativa já foi criada, não permite reenvio
   const naturezaAtiva = window.currentICNature || 'fluxo';
   if (verificarSeNaturezaJaCriada(currentModalCommit, naturezaAtiva)) {
-    const idExistente = naturezaAtiva === 'sql' 
-      ? currentModalCommit.redmine_id_sql 
+    const idExistente = naturezaAtiva === 'sql'
+      ? currentModalCommit.redmine_id_sql
       : (currentModalCommit.redmine_id_fluxo || currentModalCommit.redmine_id);
     if (elementoAlerta && elementoAlertaTexto) {
       elementoAlerta.classList.remove("d-none", "alert-danger");
@@ -1331,7 +1396,7 @@ async function criarItemCatalogoNoRedmine(elementoBotao, ehSimulacao = false) {
   const htmlBotaoOriginal = elementoBotao ? elementoBotao.innerHTML : "";
   if (elementoBotao) {
     elementoBotao.disabled = true;
-    elementoBotao.innerHTML = ehSimulacao 
+    elementoBotao.innerHTML = ehSimulacao
       ? '<span class="spinner-border spinner-border-sm me-1" role="status"></span> Validando no Redmine...'
       : '<span class="spinner-border spinner-border-sm me-1" role="status"></span> Criando no Redmine...';
   }
@@ -1691,16 +1756,121 @@ const createICDirectlyInRedmine = criarItemCatalogoNoRedmine;
 
 
 /**
- * Escape string for safe insertion into HTML
+ * Renderiza o HTML da célula de hash com link web e botões de cópia
  */
-function escapeHtml(str) {
-  if (!str) return "";
-  return String(str)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
+function renderCommitHashCellHtml(c) {
+  const shortHash = c.short_hash || (c.hash ? c.hash.substring(0, 7) : "");
+  const webUrl = c.commit_url || "";
+
+  let hashHtml = "";
+  if (webUrl) {
+    hashHtml = `
+      <a href="${webUrl}" target="_blank" class="badge-hash text-decoration-none d-inline-flex align-items-center gap-1" title="Abrir commit no GitLab/GitHub">
+        ${shortHash} <i class="bi bi-box-arrow-up-right" style="font-size: 0.65rem;"></i>
+      </a>
+      <button type="button" class="btn btn-link btn-sm p-0 text-info copy-btn" data-copy="${webUrl}" title="Copiar link direto do commit">
+        <i class="bi bi-link-45deg fs-6"></i>
+      </button>
+    `;
+  } else {
+    hashHtml = `<span class="badge-hash">${shortHash}</span>`;
+  }
+
+  hashHtml += `
+    <button type="button" class="btn btn-link btn-sm p-0 text-muted copy-btn" data-copy="${c.hash}" title="Copiar hash completo">
+      <i class="bi bi-clipboard" style="font-size: 0.75rem;"></i>
+    </button>
+  `;
+  return hashHtml;
+}
+
+/**
+ * Renderiza o HTML da célula de métricas e arquivos alterados (XML e SQL)
+ */
+function renderCommitMetricsCellHtml(c) {
+  let metricsHtml = "";
+  if (c.tem_ambos_ajustes) {
+    metricsHtml += `
+      <span class="badge bg-warning text-dark fw-bold" title="${c.ic_count_xml || 1} IC(s) de Fluxo (XML)">
+        <i class="bi bi-diagram-3-fill me-1"></i>${c.ic_count_xml || 1} Fluxo
+      </span>
+      <span class="badge text-dark fw-bold" style="background-color: #22d3ee;" title="${c.ic_count_sql || 1} IC(s) de Banco (SQL)">
+        <i class="bi bi-database-fill me-1"></i>${c.ic_count_sql || 1} SQL
+      </span>
+    `;
+  } else if (c.has_xml_changes) {
+    metricsHtml += `
+      <span class="badge bg-warning text-dark fw-bold" title="${c.ic_count_xml || c.xml_files_count || 1} IC(s) de Fluxo (XML)">
+        <i class="bi bi-diagram-3-fill me-1"></i>${c.ic_count_xml || c.xml_files_count || 1} Fluxo
+      </span>
+    `;
+  } else if (c.has_sql_changes) {
+    metricsHtml += `
+      <span class="badge text-dark fw-bold" style="background-color: #22d3ee;" title="${c.ic_count_sql || c.sql_files_count || 1} IC(s) de Banco (SQL)">
+        <i class="bi bi-database-fill me-1"></i>${c.ic_count_sql || c.sql_files_count || 1} SQL
+      </span>
+    `;
+  }
+
+  if (c.files_count > 0) {
+    metricsHtml += `
+      <button type="button" class="btn btn-sm btn-secondary-custom py-1 px-2 small" onclick="viewFilesByHash('${c.hash}')">
+        <i class="bi bi-file-code me-1 text-info"></i> ${c.files_count} arq
+      </button>
+    `;
+  } else {
+    metricsHtml += `<span class="text-muted small">-</span>`;
+  }
+  return metricsHtml;
+}
+
+/**
+ * Constrói o elemento <tr> completo para uma linha de commit na tabela
+ */
+function renderCommitTableRow(c) {
+  const tr = document.createElement("tr");
+  tr.id = `row-commit-${c.hash}`;
+
+  const hashHtml = renderCommitHashCellHtml(c);
+  const metricsHtml = renderCommitMetricsCellHtml(c);
+  const statusHtml = renderCommitStatusBadgeHtml(c);
+
+  const actionHtml = `
+    <button type="button" class="btn btn-sm btn-primary-custom py-1 px-2 small d-inline-flex align-items-center gap-1"
+            onclick="openCreateICByHash('${c.hash}')"
+            title="Gerar Item de Catálogo para este commit">
+      <i class="bi bi-card-checklist"></i>
+      <span>Criar IC</span>
+    </button>
+  `;
+
+  tr.innerHTML = `
+    <td data-col="hash"><div class="d-flex align-items-center gap-1">${hashHtml}</div></td>
+    <td data-col="date" class="text-muted small">${c.commit_date || ""}</td>
+    <td data-col="author"><div class="fw-medium text-light small">${escapeHtml(c.author || "")}</div></td>
+    <td data-col="repo">
+      <span class="badge bg-dark border border-secondary text-info small text-truncate d-inline-block" style="max-width: 120px;" title="Repositório: ${escapeHtml(c.repo_name || "Local")}">
+        <i class="bi bi-folder2 me-1"></i>${escapeHtml(c.repo_name || "Local")}
+      </span>
+    </td>
+    <td data-col="branch">
+      ${c.branch ? `
+        <span class="badge bg-primary-subtle text-primary border border-primary-subtle small text-truncate d-inline-block" style="max-width: 140px; font-family: 'JetBrains Mono', monospace; font-size: 0.72rem;" title="Branch de Origem: ${escapeHtml(c.branch)}">
+          <i class="bi bi-diagram-2 me-1"></i>${escapeHtml(c.branch)}
+        </span>
+      ` : `<span class="text-muted small">-</span>`}
+    </td>
+    <td data-col="message"><div class="text-light">${escapeHtml(c.message || "")}</div></td>
+    <td data-col="files" class="text-center">
+      <div class="d-flex align-items-center justify-content-center gap-1 flex-wrap">
+        ${metricsHtml}
+      </div>
+    </td>
+    <td data-col="status" class="text-center" id="status-cell-${c.hash}">${statusHtml}</td>
+    <td data-col="actions" class="text-center">${actionHtml}</td>
+  `;
+
+  return tr;
 }
 
 /**
@@ -1744,141 +1914,8 @@ async function loadMoreCommits() {
 
     if (data.success && Array.isArray(data.commits)) {
       data.commits.forEach((c) => {
-        // Cache in window.COMMITS_STORE
         window.COMMITS_STORE[c.hash] = c;
-
-        // Create table row
-        const tr = document.createElement("tr");
-        tr.id = `row-commit-${c.hash}`;
-
-        const shortHash = c.short_hash || (c.hash ? c.hash.substring(0, 7) : "");
-        const webUrl = c.commit_url || "";
-
-        let hashHtml = "";
-        if (webUrl) {
-          hashHtml = `
-            <a href="${webUrl}" target="_blank" class="badge-hash text-decoration-none d-inline-flex align-items-center gap-1" title="Abrir commit no GitLab/GitHub">
-              ${shortHash} <i class="bi bi-box-arrow-up-right" style="font-size: 0.65rem;"></i>
-            </a>
-            <button type="button" class="btn btn-link btn-sm p-0 text-info copy-btn" data-copy="${webUrl}" title="Copiar link direto do commit">
-              <i class="bi bi-link-45deg fs-6"></i>
-            </button>
-          `;
-        } else {
-          hashHtml = `<span class="badge-hash">${shortHash}</span>`;
-        }
-        hashHtml += `
-          <button type="button" class="btn btn-link btn-sm p-0 text-muted copy-btn" data-copy="${c.hash}" title="Copiar hash completo">
-            <i class="bi bi-clipboard" style="font-size: 0.75rem;"></i>
-          </button>
-        `;
-
-        let metricsHtml = "";
-        if (c.tem_ambos_ajustes) {
-          metricsHtml += `
-            <span class="badge bg-warning text-dark fw-bold" title="${c.ic_count_xml || 1} IC(s) de Fluxo (XML)">
-              <i class="bi bi-diagram-3-fill me-1"></i>${c.ic_count_xml || 1} Fluxo
-            </span>
-            <span class="badge text-dark fw-bold" style="background-color: #22d3ee;" title="${c.ic_count_sql || 1} IC(s) de Banco (SQL)">
-              <i class="bi bi-database-fill me-1"></i>${c.ic_count_sql || 1} SQL
-            </span>
-          `;
-        } else if (c.has_xml_changes) {
-          metricsHtml += `
-            <span class="badge bg-warning text-dark fw-bold" title="${c.ic_count_xml || c.xml_files_count || 1} IC(s) de Fluxo (XML)">
-              <i class="bi bi-diagram-3-fill me-1"></i>${c.ic_count_xml || c.xml_files_count || 1} Fluxo
-            </span>
-          `;
-        } else if (c.has_sql_changes) {
-          metricsHtml += `
-            <span class="badge text-dark fw-bold" style="background-color: #22d3ee;" title="${c.ic_count_sql || c.sql_files_count || 1} IC(s) de Banco (SQL)">
-              <i class="bi bi-database-fill me-1"></i>${c.ic_count_sql || c.sql_files_count || 1} SQL
-            </span>
-          `;
-        }
-
-        if (c.files_count > 0) {
-          metricsHtml += `
-            <button type="button" class="btn btn-sm btn-secondary-custom py-1 px-2 small" onclick="viewFilesByHash('${c.hash}')">
-              <i class="bi bi-file-code me-1 text-info"></i> ${c.files_count} arq
-            </button>
-          `;
-        } else {
-          metricsHtml += `<span class="text-muted small">-</span>`;
-        }
-
-        let statusHtml = "";
-        if (c.tem_ambos_ajustes) {
-          let flx = c.redmine_id_fluxo 
-            ? `<a href="https://redmine.tjce.jus.br/issues/${c.redmine_id_fluxo}" target="_blank" class="badge bg-warning text-dark fw-bold text-decoration-none d-inline-flex align-items-center gap-1" title="Redmine de Fluxo (.xml)"><i class="bi bi-diagram-3-fill"></i> #${c.redmine_id_fluxo}</a>`
-            : (c.is_saved_fluxo ? `<span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle d-inline-flex align-items-center gap-1" title="Fluxo salvo no banco de dados"><i class="bi bi-diagram-3"></i> Fluxo Salvo</span>` : `<span class="badge bg-secondary-subtle text-muted border border-secondary-subtle d-inline-flex align-items-center gap-1" title="Fluxo pendente"><i class="bi bi-diagram-3"></i> Fluxo Pendente</span>`);
-          let sql = c.redmine_id_sql
-            ? `<a href="https://redmine.tjce.jus.br/issues/${c.redmine_id_sql}" target="_blank" class="badge text-dark fw-bold text-decoration-none d-inline-flex align-items-center gap-1" style="background-color: #22d3ee;" title="Redmine de Scripts SQL (.sql)"><i class="bi bi-database-fill"></i> #${c.redmine_id_sql}</a>`
-            : (c.is_saved_sql ? `<span class="badge text-info border border-info-subtle d-inline-flex align-items-center gap-1" style="background-color: rgba(34, 211, 238, 0.15);" title="SQL salvo no banco de dados"><i class="bi bi-database"></i> SQL Salvo</span>` : `<span class="badge bg-secondary-subtle text-muted border border-secondary-subtle d-inline-flex align-items-center gap-1" title="SQL pendente"><i class="bi bi-database"></i> SQL Pendente</span>`);
-          statusHtml = `<div class="d-flex flex-column gap-1 align-items-center">${flx}${sql}</div>`;
-        } else if (c.has_xml_changes) {
-          const rId = c.redmine_id_fluxo || c.redmine_id;
-          if (rId) {
-            statusHtml = `<a href="https://redmine.tjce.jus.br/issues/${rId}" target="_blank" class="badge bg-warning text-dark fw-bold text-decoration-none d-inline-flex align-items-center gap-1" title="Redmine de Fluxo (.xml)"><i class="bi bi-diagram-3-fill"></i> #${rId}</a>`;
-          } else if (c.is_saved_fluxo || c.is_saved) {
-            statusHtml = `<span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle d-inline-flex align-items-center gap-1" title="Fluxo salvo no PostgreSQL"><i class="bi bi-diagram-3 me-1"></i>Fluxo Salvo</span>`;
-          } else {
-            statusHtml = `<span class="badge bg-secondary-subtle text-muted border border-secondary-subtle d-inline-flex align-items-center gap-1" title="Fluxo pendente"><i class="bi bi-diagram-3 me-1"></i>Fluxo Pendente</span>`;
-          }
-        } else if (c.has_sql_changes) {
-          const rId = c.redmine_id_sql || c.redmine_id;
-          if (rId) {
-            statusHtml = `<a href="https://redmine.tjce.jus.br/issues/${rId}" target="_blank" class="badge text-dark fw-bold text-decoration-none d-inline-flex align-items-center gap-1" style="background-color: #22d3ee;" title="Redmine de Scripts SQL (.sql)"><i class="bi bi-database-fill"></i> #${rId}</a>`;
-          } else if (c.is_saved_sql || c.is_saved) {
-            statusHtml = `<span class="badge text-info border border-info-subtle d-inline-flex align-items-center gap-1" style="background-color: rgba(34, 211, 238, 0.15);" title="SQL salvo no PostgreSQL"><i class="bi bi-database me-1"></i>SQL Salvo</span>`;
-          } else {
-            statusHtml = `<span class="badge bg-secondary-subtle text-muted border border-secondary-subtle d-inline-flex align-items-center gap-1" title="SQL pendente"><i class="bi bi-database me-1"></i>SQL Pendente</span>`;
-          }
-        } else {
-          if (c.redmine_id) {
-            statusHtml = `<a href="https://redmine.tjce.jus.br/issues/${c.redmine_id}" target="_blank" class="badge bg-success text-decoration-none d-inline-flex align-items-center gap-1" title="Abrir tarefa no Redmine"><i class="bi bi-check-circle-fill"></i> #${c.redmine_id}</a>`;
-          } else if (c.is_saved) {
-            statusHtml = `<span class="badge bg-success-subtle text-success border border-success-subtle" title="Item de Catálogo já salvo no PostgreSQL"><i class="bi bi-check-circle-fill me-1"></i>Salvo</span>`;
-          } else {
-            statusHtml = `<span class="badge bg-secondary-subtle text-muted border border-secondary-subtle" title="Sem alterações de Fluxo ou SQL">Sem IC</span>`;
-          }
-        }
-
-        const actionHtml = `
-          <button type="button" class="btn btn-sm btn-primary-custom py-1 px-2 small d-inline-flex align-items-center gap-1"
-                  onclick="openCreateICByHash('${c.hash}')"
-                  title="Gerar Item de Catálogo para este commit">
-            <i class="bi bi-card-checklist"></i>
-            <span>Criar IC</span>
-          </button>
-        `;
-
-        tr.innerHTML = `
-          <td data-col="hash"><div class="d-flex align-items-center gap-1">${hashHtml}</div></td>
-          <td data-col="date" class="text-muted small">${c.commit_date || ""}</td>
-          <td data-col="author"><div class="fw-medium text-light small">${escapeHtml(c.author || "")}</div></td>
-          <td data-col="repo">
-            <span class="badge bg-dark border border-secondary text-info small text-truncate d-inline-block" style="max-width: 120px;" title="Repositório: ${escapeHtml(c.repo_name || "Local")}">
-              <i class="bi bi-folder2 me-1"></i>${escapeHtml(c.repo_name || "Local")}
-            </span>
-          </td>
-          <td data-col="branch">
-            ${c.branch ? `
-              <span class="badge bg-primary-subtle text-primary border border-primary-subtle small text-truncate d-inline-block" style="max-width: 140px; font-family: 'JetBrains Mono', monospace; font-size: 0.72rem;" title="Branch de Origem: ${escapeHtml(c.branch)}">
-                <i class="bi bi-diagram-2 me-1"></i>${escapeHtml(c.branch)}
-              </span>
-            ` : `<span class="text-muted small">-</span>`}
-          </td>
-          <td data-col="message"><div class="text-light">${escapeHtml(c.message || "")}</div></td>
-          <td data-col="files" class="text-center">
-            <div class="d-flex align-items-center justify-content-center gap-1 flex-wrap">
-              ${metricsHtml}
-            </div>
-          </td>
-          <td data-col="status" class="text-center" id="status-cell-${c.hash}">${statusHtml}</td>
-          <td data-col="actions" class="text-center">${actionHtml}</td>
-        `;
-
+        const tr = renderCommitTableRow(c);
         tbody.appendChild(tr);
       });
 
